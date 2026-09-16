@@ -17,6 +17,6 @@ Supporting docs:
 Hard rules: security **option A** (no Lirem data to hosted APIs — local models
 only); always `export GBRAIN_HOME="$HOME/.aletheia-brain"` before `gbrain`; never
 touch `~/.gbrain/`; don't edit vendored `packages/brain/`; leave the existing
-`app/` routes (no route group) alone; `npm run build` green before each commit.
+`app/` routes (no route group) alone; `npm test` must complete with no new failures before each commit.
 
 The pre-pivot Tako AI Adoption Desk remains in `app/` and is unchanged.
