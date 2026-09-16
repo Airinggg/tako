@@ -37,12 +37,11 @@ subcommand and the sync/serve restart behavior.
 - Local models pulled:
   ```
   ollama pull bge-m3            # embeddings, 1024-dim, ~1.2 GB
-  ollama pull qwen3.5:9b        # query expansion + synthesis, ~6.6 GB
+  ollama pull qwen2.5:3b-instruct # query expansion + synthesis, ~1.9 GB
   ```
-  `qwen3.5:9b` is used over a coder model for better Japanese. Swap in a larger
-  local model later if extraction quality needs it (that is the option-A tuning
-  knob; option B — a hosted model with Lirem's written consent — is the fallback,
-  not the default).
+  `qwen2.5:3b-instruct` is the current working default: it fits the pilot
+  hardware and completes within gbrain's synthesis budget. A larger local model
+  can be evaluated later if quality needs it; hosted models are not the default.
 
 ## Initialise
 
@@ -53,8 +52,8 @@ cd packages/brain
 GBRAIN_HOME="$HOME/.aletheia-brain" bun src/cli.ts init --pglite --non-interactive \
   --embedding-model ollama:bge-m3 \
   --embedding-dimensions 1024 \
-  --expansion-model ollama:qwen3.5:9b \
-  --chat-model ollama:qwen3.5:9b
+  --expansion-model ollama:qwen2.5:3b-instruct \
+  --chat-model ollama:qwen2.5:3b-instruct
 ```
 
 - `--pglite`: embedded Postgres-in-WASM, no server. DB at

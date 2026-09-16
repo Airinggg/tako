@@ -12,13 +12,13 @@ test("checkBunVersion passes at and above the minimum, fails below it", () => {
 });
 
 test("parseOllamaTags extracts model names from the /api/tags shape", () => {
-  assert.deepEqual(parseOllamaTags({ models: [{ name: "bge-m3:latest" }, { name: "qwen3.5:9b" }] }), ["bge-m3:latest", "qwen3.5:9b"]);
+  assert.deepEqual(parseOllamaTags({ models: [{ name: "bge-m3:latest" }, { name: "qwen2.5:3b-instruct" }] }), ["bge-m3:latest", "qwen2.5:3b-instruct"]);
   assert.deepEqual(parseOllamaTags({ models: [] }), []);
   assert.deepEqual(parseOllamaTags({}), []);
 });
 
 test("checkModelsPulled matches by prefix, not exact string", () => {
-  const results = checkModelsPulled(["bge-m3:latest", "qwen3.5:9b-instruct"]);
+  const results = checkModelsPulled(["bge-m3:latest", "qwen2.5:3b-instruct"]);
   assert.equal(results.length, 2);
   assert.equal(results[0].ok, true);
   assert.equal(results[1].ok, true);

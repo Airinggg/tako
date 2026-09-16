@@ -10,7 +10,7 @@ export type DoctorCheck = {
 };
 
 const MIN_BUN_VERSION = "1.3.10";
-const REQUIRED_MODELS = ["bge-m3", "qwen3.5:9b"];
+const REQUIRED_MODELS = ["bge-m3", "qwen2.5:3b-instruct"];
 
 function compareVersions(a: string, b: string): number {
   const pa = a.split(".").map(Number);
@@ -52,8 +52,8 @@ export function parseOllamaTags(json: unknown): string[] {
   return models.map((m) => m.name ?? "").filter(Boolean);
 }
 
-/** Required models are matched by prefix (before ":") so "qwen3.5:9b" matches
- *  a locally-tagged "qwen3.5:9b-instruct" etc. — `ollama pull` tag suffixes
+/** Required models are matched by prefix (before ":") so a configured family
+ *  can match Ollama's locally-tagged variants — `ollama pull` tag suffixes
  *  vary and this check only cares that *a* usable variant is present. */
 export function checkModelsPulled(pulledTags: string[]): DoctorCheck[] {
   return REQUIRED_MODELS.map((required) => {
