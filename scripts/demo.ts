@@ -40,6 +40,7 @@ import { resolveSecret } from "../lib/connectors/shared/config.ts";
 import { DEFAULT_RULES, redact, resolveRules, summariseHits, type RedactionRule } from "../lib/govern/redact.ts";
 import { formatSyncLogLines, hashContent, parseChangedPaths, type SyncLogEntry } from "../lib/govern/sync-log.ts";
 import { checkRateLimit, ClientError, clientKey, readJsonBody, requireAdmin, resolveAdminToken, safeErrorResponse } from "../lib/util/http-security.ts";
+import { writePrivateFileAtomic } from "../lib/util/private-file.ts";
 
 const REPO = join(import.meta.dir, "..");
 
@@ -548,9 +549,7 @@ function saveConnector(name: string, input: Record<string, any>): { ok: true } {
       subdir: String(input.subdir ?? cur.subdir ?? spec.fields.find((f) => f.key === "subdir")?.def ?? "").trim(),
       [spec.nested]: { ...(cur[spec.nested] ?? {}), [key]: entry },
     };
-    const tmp = `${CONNECTORS_FILE}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n");
-    renameSync(tmp, CONNECTORS_FILE);
+    writePrivateFileAtomic(CONNECTORS_FILE, JSON.stringify(cfg, null, 2) + "\n");
     connectorsCached.clear();
     return { ok: true };
   }
@@ -587,9 +586,7 @@ function saveConnector(name: string, input: Record<string, any>): { ok: true } {
   }
 
   cfg[name] = next;
-  const tmp = `${CONNECTORS_FILE}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n");
-  renameSync(tmp, CONNECTORS_FILE);
+  writePrivateFileAtomic(CONNECTORS_FILE, JSON.stringify(cfg, null, 2) + "\n");
   connectorsCached.clear();
   return { ok: true };
 }

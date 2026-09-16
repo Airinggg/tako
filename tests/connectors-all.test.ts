@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawnSync } from "node:child_process";
+import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { resolveSecret } from "../lib/connectors/shared/config.ts";
+import { writePrivateFileAtomic } from "../lib/util/private-file.ts";
 
 test("resolves every env-configured connector token without exposing the placeholder (regression for #7)", () => {
   const env = {
@@ -15,6 +19,15 @@ test("resolves every env-configured connector token without exposing the placeho
   }
   assert.equal(resolveSecret("literal-token", env), "literal-token");
   assert.throws(() => resolveSecret("env:MISSING_TOKEN", env), /Environment variable MISSING_TOKEN is required/);
+});
+
+test("connector credential files are atomically written with owner-only permissions (regression for #9)", { skip: process.platform === "win32" }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), "tako-private-file-"));
+  const path = join(dir, "connectors.json");
+  writePrivateFileAtomic(path, '{"token":"placeholder"}\n');
+
+  assert.equal((await stat(path)).mode & 0o777, 0o600);
+  assert.equal(await readFile(path, "utf8"), '{"token":"placeholder"}\n');
 });
 
 test("connectors:all skips absent blocks and unresolved tokens", () => {
