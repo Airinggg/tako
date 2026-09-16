@@ -11,12 +11,18 @@ const full = process.argv.includes("--full");
 const config = await loadSlackConfig();
 const outputDir = join(config.sourceDir, config.subdir);
 const cursorPath = join(outputDir, ".slack-cursor.json");
+const threadCursorPath = join(outputDir, ".slack-thread-cursors.json");
 
 let cursor: Record<string, string> = {};
 try { cursor = JSON.parse(await readFile(cursorPath, "utf8")); } catch { /* first run */ }
+let threadCursors: Record<string, Record<string, string>> = {};
+try { threadCursors = JSON.parse(await readFile(threadCursorPath, "utf8")); } catch { /* first run */ }
 
 const client = new SlackClient(config.token);
-const threads = await collectSlack(client.request, config, Date.now(), full ? {} : cursor);
+const knownThreadRoots = Object.fromEntries(
+  Object.entries(threadCursors).map(([channelId, roots]) => [channelId, Object.keys(roots)]),
+);
+const threads = await collectSlack(client.request, config, Date.now(), full ? {} : cursor, full ? {} : knownThreadRoots);
 
 // Resolve Slack display names to canonical names shared across connectors.
 const people = await loadPeople();
@@ -53,7 +59,10 @@ if (!full) {
 
 const selected = full
   ? threads
-  : threads.filter((thread) => !cursor[thread.channelId] || thread.lastTs > cursor[thread.channelId]);
+  : threads.filter((thread) => {
+    const previous = threadCursors[thread.channelId]?.[thread.rootTs] ?? cursor[thread.channelId];
+    return !previous || thread.lastTs > previous;
+  });
 
 for (const thread of selected) {
   const output = renderSlack(thread);
@@ -74,6 +83,15 @@ if (Object.keys(nextCursor).length) {
   await mkdir(outputDir, { recursive: true });
   await writeFile(cursorPath, `${JSON.stringify(nextCursor, null, 2)}\n`);
 }
+
+const nextThreadCursors = full ? {} as Record<string, Record<string, string>> : structuredClone(threadCursors);
+for (const thread of threads) {
+  if (!thread.isThread) continue;
+  nextThreadCursors[thread.channelId] ??= {};
+  nextThreadCursors[thread.channelId][thread.rootTs] = thread.lastTs;
+}
+await mkdir(outputDir, { recursive: true });
+await writeFile(threadCursorPath, `${JSON.stringify(nextThreadCursors, null, 2)}\n`);
 
 console.log(`wrote ${selected.length} thread file(s) to ${outputDir}/slack/`);
 if (pruned.length) console.log(`pruned ${pruned.length} file(s) no longer in the window:\n  ${pruned.join("\n  ")}`);

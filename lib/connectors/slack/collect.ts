@@ -5,6 +5,8 @@ export type SlackMessage = { user: string; ts: string; text: string; isRoot: boo
 export type SlackThread = {
   channelId: string; channelName: string; rootTs: string; permalink: string;
   participants: string[]; lastTs: string; messages: SlackMessage[];
+  /** True when this root has replies and must be revisited on later incremental pulls. */
+  isThread: boolean;
 };
 
 const SKIP_SUBTYPES = new Set(["channel_join", "channel_leave", "channel_topic", "channel_purpose", "channel_name", "bot_add", "bot_remove"]);
@@ -69,6 +71,7 @@ export async function collectSlack(
   config: Pick<SlackConnectorConfig, "channels" | "includeThreads" | "lookbackDays">,
   now = Date.now(),
   oldestByChannel: Record<string, string> = {},
+  knownThreadRootsByChannel: Record<string, string[]> = {},
 ): Promise<SlackThread[]> {
   const users = await userMap(request);
   const channels = await resolveChannels(request, config.channels);
@@ -78,14 +81,25 @@ export async function collectSlack(
   for (const channel of channels) {
     const oldest = oldestByChannel[channel.id] ?? defaultOldest;
     const history = await paginate(request, "conversations.history", { channel: channel.id, oldest }, "messages");
+    const knownRoots = new Set(knownThreadRootsByChannel[channel.id] ?? []);
+    const roots = new Map<string, any>();
+    for (const root of history) if (root.ts) roots.set(root.ts, root);
+    // conversations.history only returns roots newer than `oldest`. Revisit
+    // previously-known thread roots separately so a new reply on an old root
+    // is not invisible to incremental sync.
+    for (const rootTs of knownRoots) {
+      if (!roots.has(rootTs)) roots.set(rootTs, { ts: rootTs, thread_ts: rootTs });
+    }
 
-    for (const root of history) {
+    for (const root of roots.values()) {
       if (root.subtype && SKIP_SUBTYPES.has(root.subtype)) continue;
       if (!root.ts) continue;
 
       let raw: any[] = [root];
-      if (config.includeThreads && root.reply_count > 0) {
+      const isThread = config.includeThreads && (root.reply_count > 0 || knownRoots.has(root.ts));
+      if (isThread) {
         const replies = await paginate(request, "conversations.replies", { channel: channel.id, ts: root.thread_ts ?? root.ts }, "messages");
+        if (!replies.length && knownRoots.has(root.ts)) continue;
         if (replies.length) raw = replies;
       }
 
@@ -112,6 +126,7 @@ export async function collectSlack(
         participants: [...new Set(messages.map((m) => m.user))].sort(),
         lastTs: messages.reduce((max, m) => (m.ts > max ? m.ts : max), root.ts),
         messages,
+        isThread,
       });
     }
   }

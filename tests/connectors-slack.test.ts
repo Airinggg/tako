@@ -46,6 +46,7 @@ test("renderSlack produces deterministic Markdown", () => {
     channelId: "C100", channelName: "planning", rootTs: "1724800000.000200",
     permalink: "https://acme.slack.com/archives/C100/p1724800000000200",
     participants: ["ada", "bea"], lastTs: "1724800900.000400",
+    isThread: true,
     messages: [
       { user: "ada", ts: "1724800000.000200", text: "Kickoff thread", isRoot: true },
       { user: "bea", ts: "1724800050.000300", text: "On it", isRoot: false },
@@ -58,6 +59,38 @@ test("renderSlack produces deterministic Markdown", () => {
 
 test("tsToIso converts Slack epoch-seconds", () => {
   assert.equal(tsToIso("1724800000.000200"), "2024-08-27T23:06:40.000Z");
+});
+
+test("incremental Slack collection revisits a known root older than the channel cursor (regression for #4)", async () => {
+  const calls: { method: string; params: Record<string, any> }[] = [];
+  const incrementalRequest = async (method: string, params: Record<string, any> = {}) => {
+    calls.push({ method, params });
+    if (method === "users.list") return api["users.list"];
+    if (method === "conversations.info") return { ok: true, channel: { id: "C100", name: "planning" } };
+    if (method === "conversations.history") return { ok: true, messages: [] };
+    if (method === "conversations.replies") return {
+      ok: true,
+      messages: [
+        { ts: "100.000001", user: "U01", text: "old root" },
+        { ts: "300.000001", user: "U02", text: "new reply" },
+      ],
+    };
+    if (method === "chat.getPermalink") return { ok: true, permalink: "https://example.test/thread" };
+    throw new Error(`unexpected Slack method: ${method}`);
+  };
+
+  const threads = await collectSlack(
+    incrementalRequest,
+    { channels: ["C100"], includeThreads: true, lookbackDays: 30 },
+    Date.now(),
+    { C100: "200.000001" },
+    { C100: ["100.000001"] },
+  );
+
+  assert.equal(threads.length, 1);
+  assert.deepEqual(threads[0].messages.map((m) => m.ts), ["100.000001", "300.000001"]);
+  assert.ok(calls.some((call) => call.method === "conversations.history" && call.params.oldest === "200.000001"));
+  assert.ok(calls.some((call) => call.method === "conversations.replies" && call.params.ts === "100.000001"));
 });
 
 test("pruneStale drops slack markdown no longer in the pull", async () => {
