@@ -1,0 +1,22 @@
+[
+  {
+    "id": "monday-project-digest",
+    "name": "Monday project digest",
+    "skill": "weekly-digest",
+    "scope": "all-hands",
+    "schedule": "weekly@mon09:00",
+    "deliverTo": "#general — DRAFT",
+    "lastRunAt": null,
+    "lastStatus": null
+  },
+  {
+    "id": "decision-audit",
+    "name": "Decision follow-up audit",
+    "skill": "decision-log-audit",
+    "scope": "all-hands",
+    "schedule": "everyNhours:24",
+    "deliverTo": "Operations review queue — DRAFT",
+    "lastRunAt": null,
+    "lastStatus": null
+  }
+]

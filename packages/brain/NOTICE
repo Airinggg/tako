@@ -1,0 +1,15 @@
+Aletheia vendors GBrain as the retrieval / knowledge-graph / job-queue engine
+under packages/brain/.
+
+  GBrain
+  Source:  https://github.com/garrytan/gbrain  (branch: master, commit b36ec092)
+  Vendored: 2026-08-28 via `git subtree add --prefix packages/brain ... --squash`
+  License: MIT — Copyright (c) 2026 Garry Tan (see packages/brain/LICENSE)
+
+The MIT license and the copyright notice in packages/brain/LICENSE are retained
+in full and apply to all files under packages/brain/. Modifications made by the
+Aletheia project on top of the vendored tree are tracked in this repository's
+git history.
+
+To pull upstream changes:
+  git subtree pull --prefix packages/brain https://github.com/garrytan/gbrain master --squash

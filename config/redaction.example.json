@@ -1,0 +1,4 @@
+[
+  { "name": "internal-codename", "label": "社内コードネーム / internal codename", "action": "flag", "pattern": "Project\\s+Nightingale" },
+  { "name": "customer-domain", "label": "顧客ドメイン / customer domain", "action": "mask", "pattern": "@(?:acme|lirem)\\.co\\.jp" }
+]

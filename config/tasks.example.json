@@ -1,0 +1,19 @@
+{
+  "source": "engineering",
+  "extractedAt": "2026-08-31T00:00:00.000Z",
+  "note": "Copy to config/tasks.json (gitignored). Produce it with `npm run tasks:extract -- <source>`, or hand-seed it. Every task should trace to a real message.",
+  "tasks": [
+    {
+      "id": "t_example",
+      "title": "Send the kickoff summary to the client",
+      "owner": "Ada Example",
+      "state": "in_progress",
+      "source": "engineering/slack/project/1754000001.md",
+      "firstSeen": "2026-08-20",
+      "lastTouched": "2026-08-29",
+      "mentions": 4,
+      "hasDeadline": true,
+      "quote": "I'll get the summary over to them by Friday"
+    }
+  ]
+}

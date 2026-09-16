@@ -1,0 +1,91 @@
+{
+  "notion": {
+    "token": "env:NOTION_TOKEN",
+    "sourceDir": "brain-sources",
+    "subdir": "shared",
+    "intervalSeconds": 300,
+    "databases": [
+      "<database-id>"
+    ],
+    "pages": [],
+    "notionVersion": "2022-06-28"
+  },
+  "slack": {
+    "token": "env:SLACK_BOT_TOKEN",
+    "sourceDir": "brain-sources",
+    "subdir": "engineering",
+    "intervalSeconds": 120,
+    "channels": [
+      "<channel-id-or-name>"
+    ],
+    "includeThreads": true,
+    "lookbackDays": 30
+  },
+  "notes": {
+    "sourceDir": "brain-sources",
+    "subdir": "personal-notes",
+    "intervalSeconds": 300,
+    "roots": [
+      "/absolute/path/to/your/notes"
+    ],
+    "extensions": [
+      ".md",
+      ".markdown",
+      ".txt"
+    ]
+  },
+  "drive": {
+    "token": "env:GOOGLE_DRIVE_ACCESS_TOKEN",
+    "sourceDir": "brain-sources",
+    "subdir": "shared",
+    "intervalSeconds": 600,
+    "folderIds": [
+      "<folder-id>"
+    ]
+  },
+  "discord": {
+    "token": "env:DISCORD_BOT_TOKEN",
+    "sourceDir": "brain-sources",
+    "subdir": "engineering",
+    "intervalSeconds": 120,
+    "guildId": "<guild-id>",
+    "channels": [
+      "<channel-id-or-name>"
+    ],
+    "includeThreads": true,
+    "lookbackDays": 30
+  },
+  "cad": {
+    "sourceDir": "brain-sources",
+    "subdir": "engineering",
+    "intervalSeconds": 900,
+    "systems": {
+      "fusion": {
+        "exportFile": "/path/to/fusion-export.json"
+      }
+    }
+  },
+  "mcp": {
+    "sourceDir": "brain-sources",
+    "subdir": "shared",
+    "intervalSeconds": 600,
+    "servers": {
+      "atlassian": {
+        "manifest": "config/manifests/atlassian.json",
+        "url": "https://mcp.atlassian.com/v1/sse",
+        "headers": {
+          "Authorization": "Bearer <token>"
+        }
+      },
+      "local-notes": {
+        "manifest": "config/manifests/local-notes.json",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-filesystem",
+          "/path/to/docs"
+        ]
+      }
+    }
+  }
+}

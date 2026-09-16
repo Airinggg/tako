@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion",
+  "type": "script",
+  "id": "aletheia_fusion_export",
+  "author": "Aletheia",
+  "description": {
+    "": "Read-only export of the active Fusion design's component metadata + BOM to the Aletheia CAD connector JSON. Creates no geometry."
+  },
+  "version": "0.1.0",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}

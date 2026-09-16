@@ -1,0 +1,24 @@
+{
+  "note": "Copy to config/reviews.json (gitignored). One entry per AI-assisted output submitted for the governed path.",
+  "reviews": [
+    {
+      "id": "rev_example",
+      "title": "Draft reply to a customer question",
+      "intent": "Answer the pricing question raised in the thread",
+      "audience": "acme.co.jp — external email",
+      "body": "Thanks for asking. Our pilot is ... [notion/pricing]",
+      "sources": ["notion/pricing"],
+      "submittedBy": "Ada Example",
+      "submittedAt": "2026-08-31T00:00:00.000Z",
+      "state": "in_review",
+      "checks": {
+        "intent": { "status": "ok", "note": "" },
+        "merit": { "status": "ok", "note": "" },
+        "harm": { "status": "unchecked", "note": "" },
+        "evidence": { "status": "unchecked", "note": "" },
+        "policy": { "status": "unchecked", "note": "" }
+      },
+      "decisions": []
+    }
+  ]
+}

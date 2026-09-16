@@ -1,0 +1,7 @@
+{
+  "_comment": "Copy to config/people.json (gitignored). Maps every alias a person appears under — Slack handle, Slack user id, Discord username or display name, email — to one canonical name so the brain attributes their work to a single identity across connectors.",
+  "aliases": {
+    "Ada Example": ["ada", "U01ABCDEF", "ada@example.com", "Ada Example_Some University"],
+    "Bea Example": ["bea", "bea.example", "Bea | PM"]
+  }
+}

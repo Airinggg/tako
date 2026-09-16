@@ -1,0 +1,46 @@
+[
+  {
+    "File Name": "GBX-1000.SLDASM",
+    "Part Number": "GBX-1000",
+    "Description": "Gearbox assembly, 3-stage",
+    "Type": "Assembly",
+    "Revision": "C",
+    "State": "Released",
+    "Configuration": "Default",
+    "Last Modified By": "t.tan",
+    "Last Modified": "2026-08-24T09:12:00Z",
+    "children": [
+      { "partNumber": "GBX-1001", "description": "Gearbox housing", "quantity": 1 },
+      { "partNumber": "GBX-1002", "description": "Output shaft", "quantity": 1 },
+      { "partNumber": "STD-BRG-6204", "description": "Ball bearing 6204", "qty": 4 }
+    ],
+    "drawings": "GBX-1000-DRW.SLDDRW",
+    "Project": "Orbit",
+    "Notes": "Rev C: swapped to 6204 bearings; added oil port."
+  },
+  {
+    "File Name": "GBX-1001.SLDPRT",
+    "Part Number": "GBX-1001",
+    "Description": "Gearbox housing",
+    "Type": "Part",
+    "Revision": "B",
+    "Material": "6061-T6",
+    "State": "Released",
+    "Last Modified By": "a.sam",
+    "Last Modified": "08/20/2026 14:05",
+    "whereUsed": "GBX-1000",
+    "drawings": ["GBX-1001-DRW.SLDDRW"]
+  },
+  {
+    "File Name": "GBX-1002.SLDPRT",
+    "Part Number": "GBX-1002",
+    "Description": "Output shaft",
+    "Type": "Part",
+    "Revision": "A",
+    "Material": "4140 steel",
+    "State": "Under Review",
+    "Last Modified By": "a.sam",
+    "Last Modified": "2026-08-28",
+    "whereUsed": ["GBX-1000"]
+  }
+]

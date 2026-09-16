@@ -1,0 +1,4 @@
+{
+  "note": "Copy to config/retention.json (gitignored). This records this instance's retention policy -- it is a documented operator decision, not a value the code enforces automatically. No Lirem-specific contractual number exists yet; 90 is a proposed default (see docs/DATA_RETENTION.md). Revisit once a real agreement specifies one.",
+  "retentionDays": 90
+}

@@ -1,0 +1,25 @@
+{
+  "/guilds/G1/channels": [
+    { "id": "100", "name": "planning", "type": 0 },
+    { "id": "200", "name": "random", "type": 0 }
+  ],
+  "/guilds/G1/threads/active": {
+    "threads": [{ "id": "300", "name": "spec review", "parent_id": "100" }],
+    "members": []
+  },
+  "/channels/100/messages": [
+    { "id": "50", "type": 19, "content": "shipping the plan tomorrow <:tada:987> https://ex.dev/plan", "timestamp": "2026-08-28T10:05:00.000000+00:00",
+      "author": { "id": "111", "username": "ada", "global_name": "Ada Example" }, "mentions": [] },
+    { "id": "40", "type": 0, "content": "hey <@222> can you check <#200>", "timestamp": "2026-08-28T09:00:00.000000+00:00",
+      "author": { "id": "111", "username": "ada", "global_name": "Ada Example" },
+      "mentions": [{ "id": "222", "username": "bea", "global_name": "Bea Example" }] },
+    { "id": "30", "type": 7, "content": "", "timestamp": "2026-08-27T08:00:00.000000+00:00", "author": { "id": "333", "username": "sys" }, "mentions": [] },
+    { "id": "45", "type": 0, "content": "beep boop synced", "timestamp": "2026-08-28T09:30:00.000000+00:00", "author": { "id": "999", "username": "connector-bot", "global_name": "Tako brain", "bot": true }, "mentions": [] },
+    { "id": "46", "type": 0, "content": "   ", "timestamp": "2026-08-28T09:45:00.000000+00:00", "author": { "id": "111", "username": "ada", "global_name": "Ada Example" }, "mentions": [] }
+  ],
+  "/channels/200/messages": [],
+  "/channels/300/messages": [
+    { "id": "70", "type": 21, "content": "spec: use option A", "timestamp": "2026-08-28T11:00:00.000000+00:00",
+      "author": { "id": "222", "username": "bea", "global_name": "Bea Example" }, "mentions": [] }
+  ]
+}

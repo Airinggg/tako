@@ -1,0 +1,5 @@
+{
+  "source": "synthetic",
+  "model": "qwen3.5:9b",
+  "think": true
+}

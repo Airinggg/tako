@@ -1,0 +1,57 @@
+[
+  {
+    "name": "Bracket Assy v3",
+    "Part Number": "BRK-ASSY",
+    "Description": "Sensor mounting bracket assembly",
+    "Type": "Assembly",
+    "Material": "",
+    "Revision": "v3",
+    "State": "",
+    "Configuration": "",
+    "Last Modified By": "A. Khew",
+    "Last Modified": "2026-08-30T04:12:00Z",
+    "children": [
+      { "partNumber": "BRK-PLATE", "description": "Base plate", "quantity": 1 },
+      { "partNumber": "BRK-ARM", "description": "Adjustable arm", "quantity": 2 },
+      { "partNumber": "STD-M4-CS", "description": "M4 countersunk screw", "quantity": 6 }
+    ],
+    "whereUsed": [],
+    "drawings": [],
+    "Notes": "",
+    "props": { "mass_kg": 0.284, "volume_cm3": 41.2, "bbox_cm": "12.0 x 8.0 x 3.4" }
+  },
+  {
+    "name": "BRK-PLATE [in Bracket Assy v3]",
+    "Part Number": "BRK-PLATE",
+    "Description": "Base plate",
+    "Type": "Part",
+    "Material": "Aluminum 6061",
+    "Revision": "",
+    "State": "",
+    "Configuration": "",
+    "Last Modified By": "",
+    "Last Modified": "",
+    "children": [],
+    "whereUsed": ["BRK-ASSY"],
+    "drawings": [],
+    "Notes": "",
+    "props": { "mass_kg": 0.180, "bbox_cm": "12.0 x 8.0 x 0.6", "Tako.tolerance_class": "IT7" }
+  },
+  {
+    "name": "Bracket Assy v3 — parameters",
+    "Part Number": "BRK-ASSY-PARAMS",
+    "Description": "Design parameters for Bracket Assy v3",
+    "Type": "Part",
+    "Material": "",
+    "Revision": "v3",
+    "State": "",
+    "Configuration": "",
+    "Last Modified By": "A. Khew",
+    "Last Modified": "2026-08-30T04:12:00Z",
+    "children": [],
+    "whereUsed": ["BRK-ASSY"],
+    "drawings": [],
+    "Notes": "arm_length = 60 mm  (max travel)\nhole_dia = 4.2 mm",
+    "props": {}
+  }
+]

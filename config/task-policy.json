@@ -1,0 +1,7 @@
+{
+  "_comment": "Working-memory decay thresholds. Compressed for the pilot: the ingested Discord data spans only ~5 days, so warm/cold are shortened to exercise all buckets. Production defaults are 7 / 21 / 10.",
+  "warmAfterDays": 2,
+  "coldAfterDays": 6,
+  "closedGraceDays": 3,
+  "noiseMinTitleChars": 8
+}

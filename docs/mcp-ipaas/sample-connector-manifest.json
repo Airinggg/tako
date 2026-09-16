@@ -1,0 +1,127 @@
+{
+  "schemaVersion": "1.0",
+  "id": "mock-cad",
+  "displayName": "Mock CAD Pilot Connector",
+  "version": "0.1.0",
+  "vendor": "Internal",
+  "domain": "cad",
+  "owner": {
+    "team": "Industrial Connectors",
+    "contact": "industrial-connectors@example.com"
+  },
+  "provenance": {
+    "sourceType": "internal",
+    "sourceUrl": "https://example.com/internal/mock-cad",
+    "revision": "0000000000000000000000000000000000000000",
+    "license": "Proprietary",
+    "licenseApproved": true,
+    "artifactDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "sbomRef": "sbom://mock-cad/0.1.0",
+    "reviewedAt": "2026-08-31T00:00:00Z"
+  },
+  "execution": {
+    "placement": "edge-windows",
+    "transport": "stdio",
+    "command": "mock-cad-mcp",
+    "args": ["--transport", "stdio"],
+    "workingDirectoryRef": "workspace://tenant-connection",
+    "environmentSecretRefs": {},
+    "concurrency": 1,
+    "timeoutMs": 30000,
+    "workspaceRequired": true,
+    "outboundOnly": true
+  },
+  "protocol": {
+    "minimumVersion": "2025-11-25",
+    "testedVersion": "2026-07-28",
+    "schemaSnapshotHash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "backwardCompatibilityTested": true
+  },
+  "auth": {
+    "type": "local-session",
+    "secretRefs": []
+  },
+  "capabilities": {
+    "tools": true,
+    "resources": false,
+    "prompts": false,
+    "tasks": false
+  },
+  "supportedApplicationVersions": [
+    {
+      "expression": "mock-1.x",
+      "status": "certified"
+    }
+  ],
+  "tools": [
+    {
+      "name": "cad_health",
+      "inputSchemaHash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "risk": "read",
+      "approval": "none",
+      "idempotency": "none",
+      "scopes": [],
+      "timeoutMs": 5000,
+      "maxAttempts": 2,
+      "dataClassifications": ["internal"],
+      "enabledByDefault": false,
+      "workspaceRequired": false,
+      "checkpointRequired": false,
+      "verificationRequired": false
+    },
+    {
+      "name": "cad_list_documents",
+      "inputSchemaHash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "risk": "read",
+      "approval": "none",
+      "idempotency": "none",
+      "scopes": ["documents:read"],
+      "timeoutMs": 10000,
+      "maxAttempts": 2,
+      "dataClassifications": ["internal", "confidential"],
+      "enabledByDefault": false,
+      "workspaceRequired": true,
+      "checkpointRequired": false,
+      "verificationRequired": false
+    },
+    {
+      "name": "cad_get_document_properties",
+      "inputSchemaHash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "risk": "read",
+      "approval": "none",
+      "idempotency": "none",
+      "scopes": ["documents:read"],
+      "timeoutMs": 10000,
+      "maxAttempts": 2,
+      "dataClassifications": ["internal", "confidential"],
+      "enabledByDefault": false,
+      "workspaceRequired": true,
+      "checkpointRequired": false,
+      "verificationRequired": true,
+      "resultSchemaRef": "schema://mock-cad/document-properties/1"
+    },
+    {
+      "name": "cad_export_copy",
+      "inputSchemaHash": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+      "risk": "create-isolated",
+      "approval": "policy",
+      "idempotency": "required",
+      "scopes": ["documents:read", "artifacts:create"],
+      "timeoutMs": 30000,
+      "maxAttempts": 1,
+      "dataClassifications": ["internal", "confidential"],
+      "enabledByDefault": false,
+      "workspaceRequired": true,
+      "checkpointRequired": false,
+      "verificationRequired": true,
+      "resultSchemaRef": "schema://common/artifact-result/1"
+    }
+  ],
+  "operations": {
+    "healthTool": "cad_health",
+    "killSwitch": true,
+    "rollbackSupported": false,
+    "supportRunbookRef": "runbook://mock-cad/operations/1",
+    "metricsPrefix": "mock_cad"
+  }
+}

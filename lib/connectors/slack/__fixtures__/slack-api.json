@@ -1,0 +1,30 @@
+{
+  "users.list": {
+    "ok": true,
+    "members": [
+      { "id": "U01", "name": "ada", "real_name": "Ada Example", "profile": { "display_name": "ada" } },
+      { "id": "U02", "name": "bea", "real_name": "Bea Example", "profile": { "display_name": "" } }
+    ]
+  },
+  "conversations.list": {
+    "ok": true,
+    "channels": [{ "id": "C100", "name": "planning" }]
+  },
+  "conversations.history:C100": {
+    "ok": true,
+    "messages": [
+      { "ts": "1724800200.000100", "user": "U02", "text": "Standalone note for <@U01> see <#C100|planning>", "reply_count": 0 },
+      { "ts": "1724800000.000200", "user": "U01", "text": "Kickoff thread", "reply_count": 2, "thread_ts": "1724800000.000200" }
+    ]
+  },
+  "conversations.replies:1724800000.000200": {
+    "ok": true,
+    "messages": [
+      { "ts": "1724800000.000200", "user": "U01", "text": "Kickoff thread" },
+      { "ts": "1724800050.000300", "user": "U02", "text": "On it" },
+      { "ts": "1724800900.000400", "user": "U01", "text": "Shipping <https://example.com|the plan>", "subtype": null }
+    ]
+  },
+  "chat.getPermalink:1724800200.000100": { "ok": true, "permalink": "https://acme.slack.com/archives/C100/p1724800200000100" },
+  "chat.getPermalink:1724800000.000200": { "ok": true, "permalink": "https://acme.slack.com/archives/C100/p1724800000000200" }
+}

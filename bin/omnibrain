@@ -1,0 +1,115 @@
+#!/usr/bin/env bun
+import { spawnSync } from "node:child_process";
+import { join, resolve } from "node:path";
+import { dispatch } from "../lib/cli/dispatch.ts";
+import { CONNECTOR_NAMES } from "../lib/connectors/registry.ts";
+import {
+  BRAIN_CLI, BRAIN_PACKAGE, brainEnv, findAlethiaServe, restartAlethiaServe,
+  serveGbrain, stopAlethiaServe,
+} from "../lib/cli/serve-runtime.ts";
+
+const REPO = resolve(import.meta.dir, "..");
+
+const USAGE = `Usage: omnibrain <command>
+
+  omnibrain doctor
+  omnibrain setup
+  omnibrain connect <${CONNECTOR_NAMES.join("|")}> [--full]
+  omnibrain sync [--source X]
+  omnibrain sync <--watch|--once> [--interval SEC]
+  omnibrain ask
+  omnibrain console
+  omnibrain scopes
+  omnibrain skills
+  omnibrain workers
+  omnibrain eval <suite>
+  omnibrain serve [--port 8787]
+  omnibrain status
+  omnibrain --help
+
+New to this machine? Run \`omnibrain doctor\` first, then \`omnibrain setup\`.
+
+All GBrain commands use $HOME/.aletheia-brain. The sync command pauses a
+running Alethia serve process, syncs, embeds all pages, then restarts it.`;
+
+function run(command: string, args: string[], options: { cwd?: string; capture?: boolean } = {}): string {
+  const result = spawnSync(command, args, {
+    cwd: options.cwd ?? REPO,
+    env: brainEnv(),
+    encoding: "utf8",
+    stdio: options.capture ? "pipe" : "inherit",
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`${command} ${args.join(" ")} exited ${result.status}`);
+  return options.capture ? result.stdout : "";
+}
+
+function runGbrain(args: string[], capture = false): string {
+  return run("bun", [BRAIN_CLI, ...args], { cwd: BRAIN_PACKAGE, capture });
+}
+
+function cleanJsonOutput(output: string): string {
+  const start = output.search(/[\[{]/);
+  return start >= 0 ? output.slice(start) : output;
+}
+
+async function sync(flags: string[]): Promise<void> {
+  const serving = await stopAlethiaServe();
+  try {
+    const selectsSource = flags.includes("--source") || flags.includes("--all");
+    runGbrain(["sync", ...(selectsSource ? flags : ["--all", ...flags])]);
+    runGbrain(["embed", "--all"]);
+  } finally {
+    if (serving) {
+      restartAlethiaServe(serving);
+      console.log(`serve restarted on port ${serving.port}`);
+    }
+  }
+}
+
+function status(): void {
+  const payload = JSON.parse(cleanJsonOutput(runGbrain(["sources", "status", "--json"], true)));
+  const serving = findAlethiaServe();
+  console.log(`Serve: ${serving ? `running on port ${serving.port} (pid ${serving.pid})` : "not running"}`);
+  console.log("Sources:");
+  const sources = (payload.sources ?? []).filter((source: any) => source.source_id !== "default");
+  if (!sources.length) console.log("- none");
+  for (const source of sources) {
+    console.log(`- ${source.source_id}: ${source.total_pages} pages; last sync ${source.last_sync_at ?? "never"}${source.sync_running ? "; syncing" : ""}`);
+  }
+}
+
+async function main(): Promise<void> {
+  const plan = dispatch(process.argv.slice(2));
+  if (plan.error) {
+    console.error(plan.error);
+    console.error("\n" + USAGE);
+    process.exitCode = 2;
+    return;
+  }
+  switch (plan.command) {
+    case "help": console.log(USAGE); return;
+    case "connect":
+      run("bun", [join(REPO, "lib/connectors", plan.target, "run.ts"), ...plan.flags]);
+      return;
+    case "sync":
+      if (plan.target === "scripts/sync-daemon.ts") run("bun", [join(REPO, plan.target), ...plan.flags]);
+      else await sync(plan.flags);
+      return;
+    case "doctor": run("bun", [join(REPO, plan.target), ...plan.flags]); return;
+    case "setup": run("bun", [join(REPO, plan.target), ...plan.flags]); return;
+    case "ask": run("bun", [join(REPO, plan.target), ...plan.flags]); return;
+    case "console": run("bun", [join(REPO, plan.target), ...plan.flags]); return;
+    case "scopes": run("bun", [join(REPO, plan.target), ...plan.flags]); return;
+    case "skills": run("bun", [join(REPO, plan.target), ...plan.flags]); return;
+    case "workers": run("bun", [join(REPO, plan.target), ...plan.flags]); return;
+    case "eval": run("bun", [join(REPO, "scripts/eval.ts"), plan.target, ...plan.flags]); return;
+    case "serve": await serveGbrain(plan.flags); return;
+    case "status": status(); return;
+  }
+}
+
+main().catch((error) => {
+  console.error(`omnibrain: ${(error as Error).message}`);
+  process.exitCode = 1;
+});

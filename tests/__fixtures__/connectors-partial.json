@@ -1,0 +1,19 @@
+{
+  "notion": {
+    "token": "env:INTENTIONALLY_UNSET_CONNECTOR_TOKEN"
+  },
+  "notes": {
+    "sourceDir": "brain-sources",
+    "subdir": "personal-notes",
+    "roots": []
+  },
+  "cad": {
+    "sourceDir": "brain-sources",
+    "subdir": "engineering",
+    "systems": {
+      "fusion": {
+        "exportFile": "lib/connectors/cad/__fixtures__/fusion-export.json"
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+[
+  {
+    "name": "engineering",
+    "purpose": "Engineering delivery context without finance or personnel records",
+    "rules": [
+      "Cite every source-backed claim",
+      "Do not infer access beyond the included prefixes"
+    ],
+    "includePrefixes": [
+      "notion/eng-wiki/",
+      "slack/platform/"
+    ],
+    "createdAt": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "name": "all-hands",
+    "purpose": "Everything — grants skills whose reads are all covered",
+    "rules": [
+      "Cite every source-backed claim"
+    ],
+    "includePrefixes": [
+      "notion/",
+      "slack/",
+      "drive/",
+      "skills/"
+    ],
+    "createdAt": "2026-08-31T00:00:00.000Z"
+  }
+]

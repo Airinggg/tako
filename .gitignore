@@ -1,0 +1,73 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/.vinext/
+/out/
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+/dist/
+/.wrangler/
+/outputs/
+/work/
+
+# project-intelligence brain — Lirem's ingested private data never enters git.
+# The brain lives at $GBRAIN_HOME (default ~/.aletheia-brain), outside the repo.
+/brain-workspace/
+*.pglite
+packages/brain/node_modules/
+cowork/handoff/codex-*run.log
+cowork/handoff/codex-*last*.txt
+
+# connector config holds tokens — keep local
+/config/connectors.json
+/brain-sources/
+/config/people.json
+/config/scopes.json
+/config/scopes.json.tmp
+/config/tasks.json
+/config/workers.json
+/config/worker-queue.json
+/config/worker-queue.json.*.tmp
+/config/workers-state.json
+/config/workers-state.json.*.tmp
+/config/reviews.json
+/config/redaction.json
+/config/mcp-catalog.json
+/config/sync-state.json
+/config/sync-state.json.*.tmp
+/config/sync-log.jsonl
+/config/retention.json
+/backups/
+/config/.sync-daemon.lock
+
+# auto-extracted skill drafts (content-derived, review locally)
+/skill-drafts/

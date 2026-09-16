@@ -1,0 +1,215 @@
+catalogVersion: "1.0"
+preparedAt: "2026-08-31"
+statusPolicy: >-
+  The supplied table is discovery input. reported-unverified and gap are not
+  production trust decisions. Every candidate must pass the blueprint intake gates.
+
+waves:
+  foundation: Platform gateway, policy, audit, secret broker, and edge runtime.
+  pilot: One local CAD connector with read-only tools, export-copy, and one governed mutation.
+  expansion: Qualify more reported MCPs plus one CAE job and one enterprise API connector.
+  discovery: Build or source connectors for stated gaps after official API and license review.
+
+connectors:
+  - id: catia-v5
+    label: CATIA
+    domain: cad
+    inventoryStatus: community-candidate
+    executionPattern: edge-windows-stdio-com
+    riskCeiling: mutate
+    proposedWave: pilot
+    evidence: https://github.com/daiemon12/catia-v5-mcp-server
+    note: MIT community server; broad surface requires a small allowlist.
+
+  - id: siemens-nx
+    label: Siemens NX
+    domain: cad
+    inventoryStatus: community-candidate-limited
+    executionPattern: edge-windows-stdio-nxopen-bridge
+    riskCeiling: mutate
+    proposedWave: expansion
+    evidence: https://github.com/DreamEnding/NX_MCP
+    note: Use only the repository's documented certified surface; interactive bridge remains a qualification item.
+
+  - id: solidworks
+    label: SOLIDWORKS
+    domain: cad
+    inventoryStatus: community-candidate
+    executionPattern: edge-windows-stdio-com
+    riskCeiling: mutate
+    proposedWave: pilot
+    evidence: https://github.com/czuryk/SolidworksMCP
+    note: Strong candidate for checkpoint, idempotency, verification, and rollback patterns.
+
+  - id: autocad
+    label: AutoCAD
+    domain: cad
+    inventoryStatus: reported-unverified
+    executionPattern: edge-windows-stdio-com
+    riskCeiling: mutate
+    proposedWave: expansion
+    note: Crowded ecosystem; use as an interoperability benchmark, not first differentiation.
+
+  - id: fusion-360
+    label: Fusion 360
+    domain: cad
+    inventoryStatus: reported-unverified
+    executionPattern: in-process-addin-plus-edge-sidecar
+    riskCeiling: mutate
+    proposedWave: expansion
+    note: Already covered in the supplied inventory; verify official/community provenance and add-in isolation.
+
+  - id: autodesk-inventor
+    label: Inventor
+    domain: cad
+    inventoryStatus: community-candidate-license-blocked
+    executionPattern: edge-windows-stdio-com
+    riskCeiling: mutate
+    proposedWave: expansion
+    evidence: https://github.com/hsavas/inventor-mcp
+    note: The referenced candidate requires permission for commercial use; do not bundle until licensed.
+
+  - id: ptc-creo
+    label: Creo
+    domain: cad
+    inventoryStatus: reported-unverified
+    executionPattern: edge-windows-local-api
+    riskCeiling: mutate
+    proposedWave: expansion
+    note: Verify candidate MCP, supported Creo versions, and automation terms.
+
+  - id: ansys
+    label: ANSYS
+    domain: cae
+    inventoryStatus: reported-unverified-strong-ai-ecosystem
+    executionPattern: cae-hpc-job-adapter
+    riskCeiling: create-isolated
+    proposedWave: expansion
+    note: Prefer durable job tools and immutable result artifacts over interactive GUI control.
+
+  - id: abaqus
+    label: Abaqus
+    domain: cae
+    inventoryStatus: reported-unverified
+    executionPattern: cae-hpc-job-adapter
+    riskCeiling: create-isolated
+    proposedWave: expansion
+    note: Treat input decks, solver jobs, status, cancellation, and results as separate tools.
+
+  - id: comsol
+    label: COMSOL
+    domain: cae
+    inventoryStatus: reported-unverified-ai-resources
+    executionPattern: cae-hpc-job-adapter
+    riskCeiling: create-isolated
+    proposedWave: expansion
+    note: Qualify MCP and AI resources independently; do not treat Hugging Face assets as connector code.
+
+  - id: siemens-teamcenter
+    label: Teamcenter
+    domain: plm
+    inventoryStatus: reported-unverified
+    executionPattern: enterprise-api-vpc-or-edge
+    riskCeiling: mutate
+    proposedWave: expansion
+    note: Start with search, item metadata, BOM, and status; gate lifecycle/release mutations.
+
+  - id: ptc-windchill
+    label: Windchill
+    domain: plm
+    inventoryStatus: reported-unverified-no-meaningful-hf
+    executionPattern: enterprise-api-vpc-or-edge
+    riskCeiling: mutate
+    proposedWave: expansion
+    note: Hugging Face coverage is irrelevant to baseline API/MCP integration readiness.
+
+  - id: sap
+    label: SAP
+    domain: erp
+    inventoryStatus: reported-unverified
+    executionPattern: enterprise-api-cloud-vpc-or-edge
+    riskCeiling: mutate
+    proposedWave: expansion
+    note: Restrict by business object, company code/plant, OAuth scope, and workflow approval.
+
+  - id: oracle
+    label: Oracle
+    domain: erp
+    inventoryStatus: partial-reported-unverified
+    executionPattern: enterprise-api-cloud-vpc-or-edge
+    riskCeiling: mutate
+    proposedWave: expansion
+    note: Identify the exact Oracle product before choosing API and auth patterns.
+
+  - id: siemens-opcenter
+    label: Opcenter
+    domain: mes
+    inventoryStatus: gap
+    executionPattern: enterprise-api-vpc-or-edge
+    riskCeiling: read
+    proposedWave: discovery
+    note: Start with official API discovery, production visibility, and read-only genealogy/quality workflows.
+
+  - id: delmia-apriso
+    label: DELMIA Apriso
+    domain: mes
+    inventoryStatus: gap
+    executionPattern: enterprise-api-vpc-or-edge
+    riskCeiling: read
+    proposedWave: discovery
+    note: Avoid production dispatch mutations in the initial connector.
+
+  - id: factorytalk
+    label: FactoryTalk
+    domain: ot
+    inventoryStatus: gap
+    executionPattern: segmented-ot-edge
+    riskCeiling: read
+    proposedWave: discovery
+    note: Production and physical-control tools remain blocked in the general Claude surface.
+
+  - id: melsoft-gx-works
+    label: MELSOFT / GX Works
+    domain: ot
+    inventoryStatus: gap
+    executionPattern: segmented-ot-edge
+    riskCeiling: read
+    proposedWave: discovery
+    note: Read-only project inventory and diagnostics first; no PLC download/run-mode changes.
+
+  - id: omron-sysmac-studio
+    label: Omron Sysmac Studio
+    domain: ot
+    inventoryStatus: gap
+    executionPattern: segmented-ot-edge
+    riskCeiling: read
+    proposedWave: discovery
+    note: Separate engineering project analysis from controller operations.
+
+  - id: etq-reliance
+    label: ETQ Reliance
+    domain: qms
+    inventoryStatus: gap
+    executionPattern: enterprise-api-cloud-vpc-or-edge
+    riskCeiling: mutate
+    proposedWave: discovery
+    note: Start with document/CAPA search and draft change requests; gate approvals and record changes.
+
+  - id: mastercontrol
+    label: MasterControl
+    domain: qms
+    inventoryStatus: gap
+    executionPattern: enterprise-api-cloud-vpc-or-edge
+    riskCeiling: mutate
+    proposedWave: discovery
+    note: Treat signatures, approvals, training completion, and release as high-risk regulated actions.
+
+  - id: mastercam
+    label: Mastercam
+    domain: cam
+    inventoryStatus: gap-or-very-weak
+    executionPattern: edge-windows-local-api
+    riskCeiling: create-isolated
+    proposedWave: discovery
+    note: Generate and verify CAM artifacts only; do not dispatch machine execution from an LLM-only decision.
+
