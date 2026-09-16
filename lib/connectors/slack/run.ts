@@ -1,10 +1,10 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { loadSlackConfig } from "../shared/config.ts";
-import { pruneStale } from "../shared/prune.ts";
+import { keepWithinWindow, pruneStale } from "../shared/prune.ts";
 import { SlackClient } from "./client.ts";
 import { collectSlack } from "./collect.ts";
-import { renderSlack } from "./render.ts";
+import { renderSlack, tsToIso } from "./render.ts";
 import { loadPeople, canonicalPerson } from "../shared/people.ts";
 
 const full = process.argv.includes("--full");
@@ -26,7 +26,30 @@ for (const thread of threads) {
 }
 
 // Every current thread maps to one file; that set drives pruning.
-const keepPaths = threads.map((thread) => join(outputDir, renderSlack(thread).path));
+const keepPaths = new Set(threads.map((thread) => join(outputDir, renderSlack(thread).path)));
+
+// Incremental runs only fetch threads with activity *after* the per-channel
+// cursor (see collectSlack's `oldest` handling), so a channel with no new
+// activity produces no thread this run. Without this, pruneStale would treat
+// that as "every existing thread in that channel was deleted upstream" --
+// this is what deleted an operator's entire local Slack corpus on a quiet
+// sync (see the regression test below). Mirror Discord's run.ts: on an
+// incremental run, also keep every existing file still inside the lookback
+// window; only `--full` (an authoritative crawl of the whole window) prunes
+// purely by what it re-collected, which is how upstream deletions eventually
+// drop out.
+if (!full) {
+  let existing: string[] = [];
+  try { existing = await readdir(join(outputDir, "slack"), { recursive: true }); } catch { /* none yet */ }
+  const mdPaths = existing.filter((rel) => rel.endsWith(".md"));
+  const dateOf = (rel: string) => {
+    const rootTs = rel.match(/([\d.]+)\.md$/)?.[1];
+    return rootTs ? tsToIso(rootTs).slice(0, 10) : undefined;
+  };
+  for (const rel of keepWithinWindow(mdPaths, dateOf, config.lookbackDays)) {
+    keepPaths.add(join(outputDir, "slack", rel));
+  }
+}
 
 const selected = full
   ? threads
@@ -39,7 +62,7 @@ for (const thread of selected) {
   await writeFile(target, output.markdown);
 }
 
-const pruned = await pruneStale(outputDir, "slack", keepPaths);
+const pruned = await pruneStale(outputDir, "slack", [...keepPaths]);
 
 const nextCursor = { ...cursor };
 for (const thread of threads) {
@@ -53,4 +76,4 @@ if (Object.keys(nextCursor).length) {
 }
 
 console.log(`wrote ${selected.length} thread file(s) to ${outputDir}/slack/`);
-if (pruned.length) console.log(`pruned ${pruned.length} file(s) no longer in the pull:\n  ${pruned.join("\n  ")}`);
+if (pruned.length) console.log(`pruned ${pruned.length} file(s) no longer in the window:\n  ${pruned.join("\n  ")}`);

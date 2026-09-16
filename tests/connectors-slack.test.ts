@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { collectSlack, resolveText } from "../lib/connectors/slack/collect.ts";
 import { renderSlack, tsToIso } from "../lib/connectors/slack/render.ts";
-import { pruneStale } from "../lib/connectors/shared/prune.ts";
+import { keepWithinWindow, pruneStale } from "../lib/connectors/shared/prune.ts";
 
 const api = JSON.parse(await readFile(new URL("../lib/connectors/slack/__fixtures__/slack-api.json", import.meta.url), "utf8"));
 const request = async (method: string, params: Record<string, any> = {}) => {
@@ -74,4 +74,25 @@ test("pruneStale drops slack markdown no longer in the pull", async () => {
   assert.deepEqual(removed, ["slack/planning/2-stale.md"]);
   assert.deepEqual(await readdir(join(dir, "slack", "planning")), ["1.md"]);
   assert.deepEqual(await readdir(join(dir, "notion", "wiki")), ["untouched.md"]);
+});
+
+test("keepWithinWindow preserves undated and still-fresh paths, drops only stale-dated ones", () => {
+  const dateOf = (rel: string) => rel.match(/([\d.]+)\.md$/)?.[1] && tsToIso(rel.match(/([\d.]+)\.md$/)![1]).slice(0, 10);
+  const now = new Date("2026-09-16T00:00:00.000Z");
+  const paths = [
+    "planning/1724800000.000200.md", // 2024-08-27 -- long past a 30-day window
+    "planning/1789430400.000000.md", // 2026-09-15 -- inside a 30-day window
+  ];
+  assert.deepEqual(keepWithinWindow(paths, dateOf, 30, now), ["planning/1789430400.000000.md"]);
+});
+
+test("keepWithinWindow: an incremental sync with zero new threads must not wipe every existing thread file (regression for #3)", () => {
+  // Simulates the real bug: collectSlack() returns nothing for a quiet channel,
+  // so run.ts's naive keepPaths (built only from this run's threads) would be
+  // empty, and pruneStale would then delete every previously-synced thread.
+  const dateOf = (rel: string) => rel.match(/([\d.]+)\.md$/)?.[1] && tsToIso(rel.match(/([\d.]+)\.md$/)![1]).slice(0, 10);
+  const existingFiles = ["planning/1789430400.000000.md", "planning/1789344000.000000.md"];
+  const now = new Date("2026-09-16T00:00:00.000Z"); // both files are from the last two days
+  const kept = keepWithinWindow(existingFiles, dateOf, 30, now);
+  assert.deepEqual(kept.sort(), existingFiles.sort());
 });

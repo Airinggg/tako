@@ -13,6 +13,26 @@ export type DiscordConversation = {
   messages: DiscordMessage[];
 };
 
+/**
+ * Merge an incremental pull's conversation (only messages after the cursor)
+ * with the same conversation's previously-written messages, deduped by
+ * message id. An incremental `collectDiscord` call only returns NEW
+ * messages for a day/thread -- rendering that alone silently drops every
+ * earlier message the file already had. `previous` is empty on a
+ * conversation's first appearance, so this is a safe no-op then.
+ */
+export function mergeConversationMessages(incoming: DiscordConversation, previous: DiscordMessage[]): DiscordConversation {
+  const byId = new Map<string, DiscordMessage>(previous.map((m) => [m.id, m]));
+  for (const m of incoming.messages) byId.set(m.id, m);
+  const messages = [...byId.values()].sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
+  return {
+    ...incoming,
+    messages,
+    participants: [...new Set(messages.map((m) => m.author))].sort(),
+    updated: messages[messages.length - 1]?.timestamp ?? incoming.updated,
+  };
+}
+
 // Message types that carry conversational content. Skip joins, pins, boosts, etc.
 const CONTENT_TYPES = new Set([0, 19, 21]); // default, reply, thread-starter
 
