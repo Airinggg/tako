@@ -86,8 +86,38 @@ async function list(request: NotionRequest, path: string, method: "GET" | "POST"
     results.push(...(page.results ?? [])); cursor = page.has_more ? page.next_cursor : null;
   } while (cursor); return results;
 }
+
+const MAX_BLOCK_DEPTH = 32;
+
+/**
+ * Return a page's blocks in document order, including descendants. Notion
+ * exposes children through a separate endpoint for every block with
+ * `has_children`; a depth-first walk preserves the order a reader sees.
+ * `visited` and the depth ceiling protect a malformed/mock response from
+ * creating an unbounded cycle.
+ */
+async function collectBlocks(
+  request: NotionRequest,
+  parentId: string,
+  depth = 0,
+  visited = new Set<string>(),
+): Promise<any[]> {
+  if (depth > MAX_BLOCK_DEPTH || visited.has(parentId)) return [];
+  visited.add(parentId);
+
+  const blocks = await list(request, `/blocks/${parentId}/children?page_size=100`);
+  const ordered: any[] = [];
+  for (const block of blocks) {
+    ordered.push(block);
+    if (block.has_children && typeof block.id === "string") {
+      ordered.push(...await collectBlocks(request, block.id, depth + 1, visited));
+    }
+  }
+  return ordered;
+}
+
 async function toRecord(request: NotionRequest, page: ApiPage, kind: NotionRecord["kind"]): Promise<NotionRecord> {
-  const blocks = await list(request, `/blocks/${page.id}/children?page_size=100`);
+  const blocks = await collectBlocks(request, page.id);
   const workspace = typeof page.parent?.database_id === "string" ? page.parent.database_id : typeof page.parent?.workspace === "string" ? page.parent.workspace : "default";
   const properties = collectProperties(page);
   const record: NotionRecord = { id: page.id, workspace, kind, title: titleOf(page), url: page.url ?? "", author: page.created_by?.name ?? page.created_by?.id, createdTime: page.created_time, lastEditedTime: page.last_edited_time, text: blocks.map(blockText).filter(Boolean).join("\n\n") };

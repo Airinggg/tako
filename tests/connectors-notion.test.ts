@@ -18,6 +18,20 @@ test("collects database rows and pages into retrieval records", async () => {
   assert.deepEqual(records[0], { id: "page-456", workspace: "default", kind: "page", title: "Team notes", url: "https://www.notion.so/page-456", author: "Bea Example", createdTime: "2026-08-21T09:00:00.000Z", lastEditedTime: "2026-08-23T10:30:00.000Z", text: "## Decision\n\nShip the beta on Friday.\n\n- [ ] Notify testers\n\n```ts\ndeploy();\n```" });
 });
 
+test("collects nested Notion block children in document order (regression for #6)", async () => {
+  const page = await fixture("notion-page.json");
+  const nested = await fixture("notion-nested-blocks.json");
+  const request = async (path: string) => {
+    if (path === "/pages/page-456") return page;
+    const response = nested[path];
+    if (!response) throw new Error(`unexpected Notion path: ${path}`);
+    return response;
+  };
+
+  const [record] = await collectNotion(request, { databases: [], pages: ["page-456"] });
+  assert.equal(record.text, "Before toggle\n\nDetails\n\n- First nested item\n\nNested explanation\n\nAfter toggle");
+});
+
 test("pulls database column values, skipping empty ones", async () => {
   const db = await fixture("notion-db-query.json"); const blocks = await fixture("notion-block-children.json");
   const request = async (path: string) => path === "/databases/team-wiki/query" ? db : blocks;
