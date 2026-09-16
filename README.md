@@ -135,8 +135,9 @@ possible future work, not built yet.
 
 Tako began as a document-review desk for Japanese SMEs (evidence-grounded
 claim checking against company sources, with Word/Excel add-ins). That
-prototype is parked, not deleted, at `app/` and `aletheia-ai-adoption-desk/`,
-and a separate hosted copy of it remains live at
+prototype is maintained separately in
+[`Airinggg/aletheia-ai-adoption-desk`](https://github.com/Airinggg/aletheia-ai-adoption-desk),
+and a hosted copy remains live at
 <https://aletheia-ai-adoption-desk.hasegawaresearchlab.chatgpt.site/> for
 continuity. It is a different, earlier product from what this repository
 builds today.

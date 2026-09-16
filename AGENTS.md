@@ -1,22 +1,42 @@
-# For the next agent
+# Agent orientation — Tako
 
-Active work is on branch `feat/brain-foundation`: pivoting Tako into a
-project-intelligence layer for the customer Lirem, built on a vendored GBrain
-engine (`packages/brain/`, MIT).
+This is the standalone [`Airinggg/tako`](https://github.com/Airinggg/tako)
+repository. Active development is on `main`. It was split from the earlier
+Aletheia monorepo; there is no `app/` directory or parked prototype in this
+repository.
 
-**Start here:** [`cowork/HANDOFF.md`](cowork/HANDOFF.md) — full state, what's done,
-your task queue.
+## Start here
 
-Supporting docs:
-- [`cowork/TASKBOARD.md`](cowork/TASKBOARD.md) — live checklist.
-- [`cowork/handoff/brain-cookbook.md`](cowork/handoff/brain-cookbook.md) — gbrain commands for this project.
-- [`docs/BRAIN_SETUP.md`](docs/BRAIN_SETUP.md) — how the local-model brain is set up.
-- `cowork/handoff/case-state-contract.ts` — the frozen `ProjectBoard` type both sides build against.
-- Design doc: `~/.gstack/projects/Airinggg-aletheia-ai-adoption-desk/2026-08-28-design-omnibrain-foundation.md`
+- [`README.md`](README.md) — product, setup and security posture.
+- [`cowork/HANDOFF.md`](cowork/HANDOFF.md) — current implementation state and
+  known open work.
+- [`docs/BRAIN_SETUP.md`](docs/BRAIN_SETUP.md) — local Ollama/gbrain setup.
+- [`docs/BRAIN_CONNECTORS.md`](docs/BRAIN_CONNECTORS.md) — connector model.
+- [`docs/PROTOTYPE_SECURITY_CHECKLIST.md`](docs/PROTOTYPE_SECURITY_CHECKLIST.md)
+  and [`docs/audit/`](docs/audit/) — launch gates and evidence.
 
-Hard rules: security **option A** (no Lirem data to hosted APIs — local models
-only); always `export GBRAIN_HOME="$HOME/.aletheia-brain"` before `gbrain`; never
-touch `~/.gbrain/`; don't edit vendored `packages/brain/`; leave the existing
-`app/` routes (no route group) alone; `npm test` must complete with no new failures before each commit.
+## Repository rules
 
-The pre-pivot Tako AI Adoption Desk remains in `app/` and is unchanged.
+- Customer content stays on customer-controlled infrastructure and is processed
+  by local models only. Do not introduce hosted-model or telemetry data flows.
+- Set `GBRAIN_HOME="$HOME/.aletheia-brain"` for gbrain commands. Never operate
+  on `~/.gbrain/`.
+- `packages/brain/` is vendored gbrain. Build around it; do not casually modify
+  vendored code.
+- Keep connectors config-driven and read-only. Never commit tokens, synced
+  customer content, local databases or generated credentials.
+- Run `npm test` before every commit. Two known failures are currently tracked
+  as GitHub issues #1 and #2; do not introduce additional failures.
+- Use small, focused commits and reference the corresponding GitHub issue.
+
+## Common commands
+
+```bash
+./bin/omnibrain doctor
+./bin/omnibrain setup
+npm run demo
+npm test
+```
+
+The Bun demo server listens on `127.0.0.1:4400` by default. Treat it as a
+single-instance, customer-controlled deployment; it is not a serverless app.
