@@ -20,10 +20,10 @@ function asStrings(value: unknown, path: string): string[] {
   return value;
 }
 
-function resolveSecret(value: string): string {
+export function resolveSecret(value: string, env: Record<string, string | undefined> = process.env): string {
   if (!value.startsWith("env:")) return value;
   const name = value.slice(4);
-  const resolved = process.env[name];
+  const resolved = env[name];
   if (!name || !resolved) throw new Error(`Environment variable ${name || "<missing>"} is required`);
   return resolved;
 }

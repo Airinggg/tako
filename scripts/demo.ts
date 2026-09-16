@@ -36,6 +36,7 @@ import { createLiveStepRunner } from "../lib/skills/run-live.ts";
 import type { SkillRunReceipt } from "../lib/skills/receipt.ts";
 import { DEFAULT_POLICY, rollupLine, triage, type DecayPolicy, type Task } from "../lib/tasks/model.ts";
 import { CHECK_KEYS, CHECK_LABELS, allowedVerdicts, canApprove, latestDecision, newReview, overallRisk, receiptLine, recordDecision, setCheck, VERDICTS, type ReviewItem, type Verdict } from "../lib/review/model.ts";
+import { resolveSecret } from "../lib/connectors/shared/config.ts";
 import { DEFAULT_RULES, redact, resolveRules, summariseHits, type RedactionRule } from "../lib/govern/redact.ts";
 import { formatSyncLogLines, hashContent, parseChangedPaths, type SyncLogEntry } from "../lib/govern/sync-log.ts";
 import { checkRateLimit, ClientError, clientKey, readJsonBody, requireAdmin, resolveAdminToken, safeErrorResponse } from "../lib/util/http-security.ts";
@@ -598,7 +599,6 @@ function saveConnector(name: string, input: Record<string, any>): { ok: true } {
 async function testConnector(name: string): Promise<{ ok: boolean; detail: string }> {
   const cfg = readJson<Record<string, any>>("config/connectors.json", {});
   const c = cfg[name] ?? {};
-  const t = String(c.token ?? "");
   try {
     if (name === "notes") {
       const roots: string[] = Array.isArray(c.roots) ? c.roots : [];
@@ -640,7 +640,12 @@ async function testConnector(name: string): Promise<{ ok: boolean; detail: strin
       }
       return { ok: allOk, detail: parts.join(" ・ ") };
     }
-    if (!t) return { ok: false, detail: "トークン未設定" };
+    const rawToken = String(c.token ?? "");
+    if (!rawToken) return { ok: false, detail: "トークン未設定" };
+    // Match the real connector loaders: config may hold `env:VARNAME`, but
+    // only the resolved value is sent to the provider. It is never returned
+    // to the browser or included in the result detail.
+    const t = resolveSecret(rawToken);
     let url = "", headers: Record<string, string> = {}, pick = (j: any) => JSON.stringify(j).slice(0, 80);
     if (name === "notion") { url = "https://api.notion.com/v1/users/me"; headers = { Authorization: `Bearer ${t}`, "Notion-Version": "2022-06-28" }; pick = (j) => j.name || j.bot?.owner?.type || "ok"; }
     else if (name === "slack") { url = "https://slack.com/api/auth.test"; headers = { Authorization: `Bearer ${t}` }; pick = (j) => (j.ok ? `${j.team} / ${j.user}` : j.error); }
