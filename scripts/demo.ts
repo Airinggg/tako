@@ -491,6 +491,12 @@ function connectorsView() {
       hasToken: spec.hasToken, tokenLabel: spec.tokenLabel, tokenPh: spec.tokenPh,
       tokenMasked: spec.hasToken ? maskToken(c.token) : "",
       configured,
+      // Server-side flag so the client never needs to compare against a
+      // connector's internal registry name — that internal name is one of
+      // this product's own jargon terms and must not leak into the served
+      // page's static script text (see docs/audit for the jargon-leak test
+      // this closes).
+      hasIndustrialCatalog: name === "mcp",
       note: spec.nested && nestedKeys.length ? `登録済み: ${nestedKeys.join(", ")}` : "",
       fields: spec.fields.map((f) => {
         const v = spec.nested && f.key !== "subdir" ? "" : c[f.key];   // nested fields start blank (add one at a time)
@@ -891,7 +897,11 @@ const REVIEW_STATE_LABEL: Record<string, string> = {
   in_review: "In review",
 };
 
-function activityView(): { entries: ActivityEntry[] } {
+// Exported for testing: unlike renderPage() (a module-level constant baked
+// once at import time), this reads config/reviews.json fresh on every call
+// -- the same function the live /api/activity route uses -- so a test can
+// seed a fixture and see it reflected without needing to reload the module.
+export function activityView(): { entries: ActivityEntry[] } {
   const entries: ActivityEntry[] = [];
 
   // Source 1: the one real per-skill run receipt (module-level `skillRun`,
@@ -970,7 +980,7 @@ function renderActivityItem(e: ActivityEntry): string {
     + `</li>`;
 }
 
-function renderActivityList(entries: ActivityEntry[]): string {
+export function renderActivityList(entries: ActivityEntry[]): string {
   return entries.length ? entries.map(renderActivityItem).join("") : '<li class="hint">No activity yet.</li>';
 }
 
@@ -1155,7 +1165,7 @@ if (import.meta.main) {
         if (url.pathname === "/api/connectors") {
           return json(connectorsCached());
         }
-        if (url.pathname === "/api/mcp-industrial") {
+        if (url.pathname === "/api/connectors/industrial-catalog") {
           return json(industrialCatalogCached());
         }
         if (url.pathname === "/api/connectors/save" && req.method === "POST") {
@@ -2491,7 +2501,7 @@ const serviceMark=name=>{
     drive:'<path d="m12 3 8 14H4L12 3Z"/><path d="m8 10 4 7 4-7M8 10h8"/>',
     discord:'<path d="M6 7.5c3.8-2 8.2-2 12 0l1.5 9c-2 1.7-3.8 2.5-5.5 2.8l-1.2-1.8h-1.6L10 19.3c-1.7-.3-3.5-1.1-5.5-2.8l1.5-9Z"/><circle cx="9" cy="13" r="1"/><circle cx="15" cy="13" r="1"/>',
     notes:'<path d="M6 3.5h9l3 3v14H6z"/><path d="M15 3.5v4h3M9 11h6M9 15h6"/>',
-    mcp:'<circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="m8.4 11 7.2-4M8.4 13l7.2 4"/>',
+    customTool:'<circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="m8.4 11 7.2-4M8.4 13l7.2 4"/>',
     cad:'<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/>',
     solidworks:'<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/>'
   };
@@ -2501,7 +2511,7 @@ const serviceMark=name=>{
 async function loadConnect(force){
   if(connectLoaded&&!force)return;connectLoaded=true;
   try{
-    const [d,industrial]=await Promise.all([api('/api/connectors'),api('/api/mcp-industrial')]);
+    const [d,industrial]=await Promise.all([api('/api/connectors'),api('/api/connectors/industrial-catalog')]);
     if(!d.canSave)$('#cx-note').textContent='Read-only instance (demo mode) — changes are disabled.';
     cxState.rows=d.rows||[];cxState.industrial=industrial;cxState.canSave=d.canSave;
     const cats=[...new Set(cxState.rows.map(r=>r.category))];
@@ -2526,7 +2536,7 @@ function renderCxGrid(){
   if(!list.length){grid.innerHTML='<div class="cx-none">No services match</div>';return;}
   grid.innerHTML=list.map(r=>
     '<button class="cx-card" data-name="'+esc(r.name)+'" aria-expanded="'+(cxState.sel===r.name)+'">'
-    +serviceMark(r.name)
+    +serviceMark(r.hasIndustrialCatalog?'customTool':r.name)
     +'<span class="nm">'+esc(r.label)+'</span>'
     +'<span class="st">'+(r.configured?'<span class="dot-ok"></span>Connected':'<span class="dot-off"></span>Not connected')
       +(r.pages?' · '+r.pages+' pages':'')+'</span></button>').join('');
@@ -2577,7 +2587,7 @@ function selectCx(name,openAdvanced){
         +(cxState.canSave?'<button class="file save" type="button">Save</button>':'')
         +'<button class="test" type="button">Test</button>'
         +'<span class="out"></span>'
-      +'</div>'+(r.name==='mcp'?renderIndustrial(cxState.industrial):'')+'</div>'
+      +'</div>'+(r.hasIndustrialCatalog?renderIndustrial(cxState.industrial):'')+'</div>'
     +'</details>';
   panel.hidden=false;
   const advanced=$('.tako-advanced',panel);

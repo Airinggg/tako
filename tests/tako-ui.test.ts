@@ -1,7 +1,43 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { NAV_GROUPS, renderPage } from "../scripts/demo.ts";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { NAV_GROUPS, activityView, renderActivityList, renderPage } from "../scripts/demo.ts";
 import { TAKO_COLORS, TAKO_CSS_TOKENS } from "../scripts/tako/tokens.ts";
+
+// scripts/demo.ts always resolves config/reviews.json against the real repo
+// root -- there's no env-var override for this path (unlike, e.g.,
+// CONNECTORS_CONFIG_PATH for the connector runners). config/reviews.example.json
+// (what a fresh clone actually has) contains no "needs retry" item, so the
+// activity test below must seed a real, temporary fixture and always restore
+// whatever was there before -- never leave a developer's real local
+// config/reviews.json altered, whether the test passes or throws.
+const REVIEWS_PATH = join(import.meta.dir, "..", "config", "reviews.json");
+function withSeededRetryReview<T>(fn: () => T): T {
+  const existed = existsSync(REVIEWS_PATH);
+  const original = existed ? readFileSync(REVIEWS_PATH, "utf8") : null;
+  const fixture = {
+    reviews: [{
+      id: "rev_test_retry_fixture",
+      title: "Test fixture needing revision",
+      intent: "test", audience: "test", body: "test body", sources: ["shared/notes/x"],
+      submittedBy: "test", submittedAt: "2026-01-01T00:00:00.000Z",
+      state: "revise",
+      checks: {
+        intent: { status: "ok", note: "" }, merit: { status: "ok", note: "" },
+        harm: { status: "ok", note: "" }, evidence: { status: "ok", note: "" }, policy: { status: "ok", note: "" },
+      },
+      decisions: [{ verdict: "revise", by: "test", at: "2026-01-01T00:00:00.000Z", note: "needs another pass" }],
+    }],
+  };
+  try {
+    writeFileSync(REVIEWS_PATH, JSON.stringify(fixture, null, 2));
+    return fn();
+  } finally {
+    if (existed) writeFileSync(REVIEWS_PATH, original!);
+    else if (existsSync(REVIEWS_PATH)) unlinkSync(REVIEWS_PATH);
+  }
+}
 
 test("navigation matches the tako information architecture exactly", () => {
   assert.deepEqual(NAV_GROUPS, [
@@ -161,13 +197,16 @@ test("Ask Tako hides the model name from the main view", () => {
 });
 
 test("Activity shows outcome-first entries with a retry action on failure", () => {
-  const html = renderPage();
-  // NB: use the full opening-tag pattern, not a bare `data-name="activity"`
-  // substring split — the sidebar nav button also renders `data-name="activity"`
-  // and appears earlier in the document, so splitting on the bare attribute
-  // grabs the wrong slice of the page. Same bug class as Connected Apps/Ask/Tasks.
-  const activitySection = html.split('<section class="section" data-name="activity">')[1]?.split("</section>")[0] || "";
-  assert.match(activitySection, /Retry/);
+  // renderPage()'s HTML is a module-level constant baked once at import
+  // time (see scripts/demo.ts's `const PAGE = ...`) -- a fixture written
+  // after the module has already loaded can never affect it. activityView()
+  // itself, unlike the frozen page, reads config/reviews.json fresh on
+  // every call (it's what the live /api/activity route also uses), so test
+  // the real rendering path directly instead of the static page snapshot.
+  withSeededRetryReview(() => {
+    const html = renderActivityList(activityView().entries);
+    assert.match(html, /Retry/);
+  });
 });
 
 test("Approvals uses plain-language decision vocabulary, not academic terms", () => {
