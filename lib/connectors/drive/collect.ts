@@ -4,6 +4,10 @@ import { ocrImage, ocrPdfIfEmpty } from "../shared/ocr.ts";
 export type DriveFile = {
   id: string; name: string; mimeType: string; modifiedTime: string;
   webViewLink?: string; text: string;
+  /** which configured folder this file was listed from — cursors are kept
+   *  per folder (see collectDrive), so callers need this to advance the
+   *  right one. */
+  folderId: string;
   /** true when skipped by the incremental cursor — metadata only, no content fetch. */
   skipped?: boolean;
 };
@@ -140,26 +144,36 @@ async function extractContent(request: Request, file: { id: string; mimeType: st
   return "";
 }
 
+/** Accept a bare id, a "folders/<id>" fragment, or a full Drive URL. */
+export function normalizeFolderId(rawFolderId: string): string {
+  return rawFolderId
+    .replace(/^https?:\/\/[^/]+\/(?:drive\/)?(?:u\/\d+\/)?folders\//, "")
+    .replace(/^folders\//, "")
+    .split(/[?&#]/)[0];
+}
+
 /**
  * List and extract text from files directly in each configured folder.
- * `since` (ISO modifiedTime) skips content extraction for unchanged files; those
- * are still returned (skipped:true) so pruning keeps their existing Markdown.
+ * `sinceByFolder` (folderId -> ISO modifiedTime) skips content extraction
+ * for unchanged files IN THAT FOLDER; those are still returned
+ * (skipped:true) so pruning keeps their existing Markdown. Keyed per
+ * folder, not one global cursor, so a folder added after earlier syncs has
+ * no entry and is always treated as a first (full) sync for itself — a
+ * single shared cursor would otherwise skip any of its files older than
+ * whatever the other folders had already advanced to.
  */
 export async function collectDrive(
   request: Request,
   config: Pick<DriveConnectorConfig, "folderIds">,
-  since?: string,
+  sinceByFolder?: Record<string, string>,
   /** fired as soon as each file's content is ready, so callers can persist
    * incrementally (PDF batches are slow and may be interrupted). */
   onFile?: (file: DriveFile) => void | Promise<void>,
 ): Promise<DriveFile[]> {
   const out: DriveFile[] = [];
   for (const rawFolderId of config.folderIds) {
-    // Accept a bare id, a "folders/<id>" fragment, or a full Drive URL.
-    const folderId = rawFolderId
-      .replace(/^https?:\/\/[^/]+\/(?:drive\/)?(?:u\/\d+\/)?folders\//, "")
-      .replace(/^folders\//, "")
-      .split(/[?&#]/)[0];
+    const folderId = normalizeFolderId(rawFolderId);
+    const since = sinceByFolder?.[folderId];
     const query = encodeURIComponent(`'${folderId.replace(/'/g, "\\'")}' in parents and trashed = false`);
     const fields = encodeURIComponent("files(id,name,mimeType,modifiedTime,webViewLink),nextPageToken");
     for (let token = "";;) {
@@ -167,10 +181,10 @@ export async function collectDrive(
       for (const file of page.files ?? []) {
         if (!isSupported(file.mimeType)) continue;
         if (since && file.modifiedTime && file.modifiedTime <= since) {
-          out.push({ ...file, text: "", skipped: true });
+          out.push({ ...file, folderId, text: "", skipped: true });
           continue;
         }
-        const record: DriveFile = { ...file, text: await extractContent(request, file) };
+        const record: DriveFile = { ...file, folderId, text: await extractContent(request, file) };
         out.push(record);
         await onFile?.(record);
       }
