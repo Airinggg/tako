@@ -38,7 +38,7 @@ import { DEFAULT_POLICY, rollupLine, triage, type DecayPolicy, type Task } from 
 import { CHECK_KEYS, CHECK_LABELS, allowedVerdicts, canApprove, latestDecision, newReview, overallRisk, receiptLine, recordDecision, setCheck, VERDICTS, type ReviewItem, type Verdict } from "../lib/review/model.ts";
 import { resolveSecret } from "../lib/connectors/shared/config.ts";
 import { DEFAULT_RULES, redact, resolveRules, summariseHits, type RedactionRule } from "../lib/govern/redact.ts";
-import { formatSyncLogLines, hashContent, parseChangedPaths, type SyncLogEntry } from "../lib/govern/sync-log.ts";
+import { diffGitStatus, formatSyncLogLines, hashContent, parseGitStatus, type SyncLogEntry } from "../lib/govern/sync-log.ts";
 import { checkRateLimit, ClientError, clientKey, readJsonBody, requireAdmin, resolveAdminToken, safeErrorResponse } from "../lib/util/http-security.ts";
 import { writePrivateFileAtomic } from "../lib/util/private-file.ts";
 
@@ -659,21 +659,38 @@ async function testConnector(name: string): Promise<{ ok: boolean; detail: strin
 
 const SYNC_LOG_FILE = join(REPO, "config/sync-log.jsonl");
 
-/** Append what a sync actually added/changed to the provenance log — never
- *  a gate, only a record (see lib/govern/sync-log.ts's header comment for
- *  why). Failure to log never blocks the sync itself; it's best-effort. */
-function appendSyncLog(name: string, subdir: string): void {
+/** `git status --porcelain -- subdir`, parsed. Read-only — safe to call
+ *  before and after a connector run to isolate what THAT run actually
+ *  touched (see appendSyncLog). */
+function gitStatusFor(subdir: string): { changed: string[]; deleted: string[] } {
+  const status = spawnSync("git", ["status", "--porcelain", "--", subdir], {
+    cwd: join(REPO, "brain-sources"), encoding: "utf8", timeout: 10_000,
+  });
+  if (status.status !== 0) return { changed: [], deleted: [] };
+  return parseGitStatus(status.stdout);
+}
+
+/** Append what a sync actually added/changed/deleted to the provenance
+ *  log — never a gate, only a record (see lib/govern/sync-log.ts's header
+ *  comment for why). `before` is the subdir's git status captured BEFORE
+ *  this connector's pull ran; diffing against the current status is what
+ *  keeps two connectors sharing a subdir (e.g. notion and drive both
+ *  default to "shared") from attributing each other's leftover dirty
+ *  files to whichever one happens to sync last. Failure to log never
+ *  blocks the sync itself; it's best-effort. */
+function appendSyncLog(name: string, subdir: string, before: { changed: string[]; deleted: string[] }): void {
   try {
-    const status = spawnSync("git", ["status", "--porcelain", "--", subdir], {
-      cwd: join(REPO, "brain-sources"), encoding: "utf8", timeout: 10_000,
-    });
-    if (status.status !== 0) return;
+    const after = gitStatusFor(subdir);
+    const { changed, deleted } = diffGitStatus(before, after);
     const now = new Date().toISOString();
-    const entries: SyncLogEntry[] = parseChangedPaths(status.stdout).map((path) => {
-      let hash = "";
-      try { hash = hashContent(readFileSync(join(REPO, "brain-sources", path), "utf8")); } catch { /* file gone by the time we read it — skip hashing, still log the path */ }
-      return { source: name, path, hash, syncedBy: "operator", syncedAt: now };
-    });
+    const entries: SyncLogEntry[] = [
+      ...changed.map((path): SyncLogEntry => {
+        let hash = "";
+        try { hash = hashContent(readFileSync(join(REPO, "brain-sources", path), "utf8")); } catch { /* file gone by the time we read it — skip hashing, still log the path */ }
+        return { source: name, path, action: "synced", hash, syncedBy: "operator", syncedAt: now };
+      }),
+      ...deleted.map((path): SyncLogEntry => ({ source: name, path, action: "deleted", hash: "", syncedBy: "operator", syncedAt: now })),
+    ];
     if (entries.length) appendFileSync(SYNC_LOG_FILE, formatSyncLogLines(entries));
   } catch { /* logging must never break the sync it's describing */ }
 }
@@ -690,6 +707,12 @@ async function syncConnector(name: string): Promise<{ ok: boolean; detail: strin
   const c = cfg[name];
   if (!c) return { ok: false, detail: "未設定 / not configured yet" };
 
+  const subdir = String(c.subdir || "shared");
+  // Snapshot BEFORE the pull runs — this is what makes attribution correct
+  // when another connector shares this subdir and left it dirty already
+  // (see appendSyncLog's doc comment).
+  const beforePull = gitStatusFor(subdir);
+
   const pull = spawnSync("bun", [connectorRunner(name)], {
     cwd: REPO, encoding: "utf8", timeout: 120_000, killSignal: "SIGKILL",
   });
@@ -697,10 +720,9 @@ async function syncConnector(name: string): Promise<{ ok: boolean; detail: strin
     return { ok: false, detail: `取り込み失敗 / fetch failed: ${(pull.stderr || pull.error?.message || "unknown error").toString().slice(0, 200)}` };
   }
 
-  const subdir = String(c.subdir || "shared");
   // Log what's about to be embedded (source, hash, who, when) before the
   // embed pass, so the trail exists even if the embed step itself fails.
-  appendSyncLog(name, subdir);
+  appendSyncLog(name, subdir, beforePull);
 
   const sync = spawnSync("bun", ["src/cli.ts", "sync", "--source", subdir, "--working-tree"], {
     cwd: join(REPO, "packages/brain"),
