@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkBunVersion, checkConnectorsConfig, checkGbrainHome, checkModelsPulled, formatReport, parseOllamaTags } from "../lib/cli/doctor.ts";
+import { checkBunVersion, checkConnectorsConfig, checkGbrainHome, checkMeetingInbox, checkModelsPulled, formatReport, parseOllamaTags } from "../lib/cli/doctor.ts";
 
 test("checkBunVersion passes at and above the minimum, fails below it", () => {
   assert.equal(checkBunVersion("1.3.10").ok, true);
@@ -51,4 +51,13 @@ test("formatReport summarises pass/fail and lists fixes only for failures", () =
 test("formatReport reports all-clear when nothing failed", () => {
   const report = formatReport([{ name: "a", ok: true, detail: "fine" }]);
   assert.match(report, /All checks passed/);
+});
+
+test("meeting inbox is advisory until enabled and fails closed without leaking its path", () => {
+  assert.equal(checkMeetingInbox(false, false).ok, true);
+  assert.equal(checkMeetingInbox(true, false).ok, true);
+  assert.equal(checkMeetingInbox(true, true).ok, true);
+  const failed = checkMeetingInbox(true, true, "invalid-local-state");
+  assert.equal(failed.ok, false);
+  assert.doesNotMatch(`${failed.detail} ${failed.fix}`, /\/Users\/|publisher|佐藤/);
 });

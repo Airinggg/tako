@@ -1,5 +1,7 @@
 import { readFile } from "node:fs/promises";
-import { isAbsolute, normalize } from "node:path";
+import { isAbsolute, join, normalize, resolve } from "node:path";
+import { writePrivateFileAtomic } from "../../util/private-file.ts";
+import type { MeetingInboxConfig, MeetingInboxWorkspace } from "../meetings/inbox.ts";
 
 export type NotionConnectorConfig = {
   token: string;
@@ -222,4 +224,58 @@ export async function loadCadConfig(path = "config/connectors.json"): Promise<Ca
     subdir: asRelativeSubdir(value.subdir, "cad.subdir"),
     systems,
   };
+}
+
+const SAFE_LOCAL_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
+function exactKeys(value: Record<string, unknown>, allowed: readonly string[], path: string): void {
+  const unknown = Object.keys(value).find((key) => !allowed.includes(key));
+  if (unknown) throw new Error(`${path}.${unknown} is not allowed`);
+}
+
+/** Load the separate, local-only meeting inbox configuration. */
+export async function loadMeetingInboxConfig(path = "config/meeting-inbox.json"): Promise<MeetingInboxConfig> {
+  const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("meeting inbox config must be an object");
+  const root = parsed as Record<string, unknown>;
+  exactKeys(root, ["schemaVersion", "inboxRoot", "processedRecoveryDays", "workspaces"], "config");
+  if (root.schemaVersion !== "1.0") throw new Error("config.schemaVersion must equal 1.0");
+  const inboxRoot = asString(root.inboxRoot, "config.inboxRoot");
+  if (!isAbsolute(inboxRoot) || resolve(inboxRoot) !== inboxRoot) throw new Error("config.inboxRoot must be a canonical absolute path");
+  if (root.processedRecoveryDays !== 7) throw new Error("config.processedRecoveryDays must equal 7");
+  if (!Array.isArray(root.workspaces)) throw new Error("config.workspaces must be an array");
+
+  const workspaces: MeetingInboxWorkspace[] = root.workspaces.map((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error(`config.workspaces[${index}] must be an object`);
+    const workspace = entry as Record<string, unknown>;
+    const prefix = `config.workspaces[${index}]`;
+    exactKeys(workspace, ["id", "label", "sourceId", "classification", "retentionDays", "enabled"], prefix);
+    const id = asString(workspace.id, `${prefix}.id`);
+    const label = asString(workspace.label, `${prefix}.label`);
+    const sourceId = asString(workspace.sourceId, `${prefix}.sourceId`);
+    if (!SAFE_LOCAL_ID.test(id)) throw new Error(`${prefix}.id must be path-safe lowercase text`);
+    if (!SAFE_LOCAL_ID.test(sourceId)) throw new Error(`${prefix}.sourceId must be path-safe lowercase text`);
+    if (Array.from(label).length > 120) throw new Error(`${prefix}.label must be at most 120 characters`);
+    if (workspace.classification !== "internal") throw new Error(`${prefix}.classification must equal internal`);
+    if (!Number.isSafeInteger(workspace.retentionDays) || Number(workspace.retentionDays) < 1 || Number(workspace.retentionDays) > 3650) throw new Error(`${prefix}.retentionDays must be an integer between 1 and 3650`);
+    if (typeof workspace.enabled !== "boolean") throw new Error(`${prefix}.enabled must be a boolean`);
+    return { id, label, sourceId, classification: "internal", retentionDays: Number(workspace.retentionDays), enabled: workspace.enabled };
+  });
+  for (const field of ["id", "label", "sourceId"] as const) {
+    const values = workspaces.map((workspace) => workspace[field]);
+    if (new Set(values).size !== values.length) throw new Error(`config.workspace ${field} values must be unique`);
+  }
+  return { schemaVersion: "1.0", inboxRoot, processedRecoveryDays: 7, workspaces };
+}
+
+/** Publish only the non-secret choices the standalone transcriber needs. */
+export function writeMeetingWorkspaceCatalog(config: MeetingInboxConfig, updatedAt = new Date().toISOString()): string {
+  const path = join(config.inboxRoot, "workspace-catalog.json");
+  const catalog = {
+    schemaVersion: "1.0",
+    workspaces: config.workspaces.filter((workspace) => workspace.enabled).map(({ id, label, classification }) => ({ id, label, classification })),
+    updatedAt,
+  };
+  writePrivateFileAtomic(path, `${JSON.stringify(catalog, null, 2)}\n`);
+  return path;
 }

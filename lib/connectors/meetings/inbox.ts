@@ -121,6 +121,13 @@ export async function ensureMeetingInbox(config: MeetingInboxConfig): Promise<vo
   }
 }
 
+/** Read-only local prerequisite check used by `omnibrain doctor`. */
+export function validateMeetingInboxDirectories(config: MeetingInboxConfig): void {
+  assertCanonicalRoot(config.inboxRoot);
+  assertPrivateDirectory(config.inboxRoot);
+  for (const state of STATES) assertPrivateDirectory(join(config.inboxRoot, state));
+}
+
 export async function listReadyPackages(root: string): Promise<string[]> {
   const ready = join(root, "ready");
   assertPrivateDirectory(ready);

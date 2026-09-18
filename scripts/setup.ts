@@ -2,7 +2,7 @@
  *  config/*.example.json templates and reports which env vars still need
  *  setting. Never writes a real secret: copies are of the placeholder
  *  templates only, which already use "env:VARNAME" tokens. */
-import { copyFileSync, existsSync, readFileSync, readdirSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { CONNECTORS } from "../lib/connectors/registry.ts";
 import { credentialGuidePath, extractEnvPlaceholders, missingEnvVars, planConfigScaffold } from "../lib/cli/setup.ts";
@@ -20,6 +20,7 @@ function main(): void {
   for (const real of toCopy) {
     const example = real.replace(/\.json$/, ".example.json");
     copyFileSync(join(CONFIG_DIR, example), join(CONFIG_DIR, real));
+    chmodSync(join(CONFIG_DIR, real), 0o600);
     console.log(`created config/${real} from config/${example}`);
   }
   for (const real of alreadyPresent) {

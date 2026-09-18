@@ -4,10 +4,10 @@ import { credentialGuidePath, extractEnvPlaceholders, missingEnvVars, planConfig
 
 test("planConfigScaffold copies missing files and leaves existing ones alone", () => {
   const plan = planConfigScaffold(
-    ["connectors.example.json", "scopes.example.json", "people.example.json"],
+    ["connectors.example.json", "scopes.example.json", "people.example.json", "meeting-inbox.example.json"],
     new Set(["scopes.json"]),
   );
-  assert.deepEqual(plan.toCopy.sort(), ["connectors.json", "people.json"]);
+  assert.deepEqual(plan.toCopy.sort(), ["connectors.json", "meeting-inbox.json", "people.json"]);
   assert.deepEqual(plan.alreadyPresent, ["scopes.json"]);
 });
 

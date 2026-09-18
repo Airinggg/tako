@@ -85,6 +85,22 @@ export function checkConnectorsConfig(exists: boolean, path: string): DoctorChec
   };
 }
 
+export function checkMeetingInbox(configExists: boolean, enabled: boolean, issue?: "invalid-config" | "invalid-local-state"): DoctorCheck {
+  if (!configExists) {
+    return { name: "meeting inbox", ok: true, detail: "not configured (optional)", fix: "Run: omnibrain setup when you are ready to enable local meeting import" };
+  }
+  if (!enabled && !issue) return { name: "meeting inbox", ok: true, detail: "configured but not enabled" };
+  if (issue) {
+    return {
+      name: "meeting inbox",
+      ok: false,
+      detail: issue === "invalid-config" ? "enabled configuration is invalid" : "enabled local directories or permissions are invalid",
+      fix: "Review config/meeting-inbox.json and the local inbox owner-only permissions",
+    };
+  }
+  return { name: "meeting inbox", ok: true, detail: "enabled local inbox is ready" };
+}
+
 export function formatReport(checks: DoctorCheck[]): string {
   const lines: string[] = [];
   for (const c of checks) {
