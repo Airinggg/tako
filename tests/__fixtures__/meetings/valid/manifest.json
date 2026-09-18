@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "1.0",
+  "packageType": "tako.meeting",
+  "meeting": {
+    "id": "mtg_018f1f0c-7b4a-7cc1-8bc2-123456789abc",
+    "title": "週次プロジェクト確認",
+    "workspaceId": "engineering",
+    "classification": "internal",
+    "startedAt": "2026-09-18T09:00:00+09:00",
+    "endedAt": "2026-09-18T09:30:00+09:00",
+    "timezone": "Asia/Tokyo",
+    "organizer": { "displayName": "佐藤 花子" },
+    "participants": [{ "displayName": "田中 太郎", "email": "tanaka@example.test" }]
+  },
+  "publisher": { "displayName": "佐藤 花子", "email": "sato@example.test" },
+  "consent": {
+    "affirmedByPublisher": true,
+    "affirmedAt": "2026-09-18T09:35:00+09:00",
+    "statementVersion": "1.0"
+  },
+  "capture": {
+    "mode": "live",
+    "transcriberVersion": "1.0.0",
+    "whisperModel": "small",
+    "whisperModelSha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "language": "ja",
+    "outputMode": "transcribe",
+    "completedAt": "2026-09-18T09:31:00+09:00"
+  },
+  "artifacts": {
+    "transcript": {
+      "path": "transcript.jsonl",
+      "bytes": 283,
+      "sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "mediaType": "application/x-ndjson"
+    }
+  },
+  "analysisRequest": {
+    "schemaVersion": "1.0",
+    "targets": [
+      "candidate-decisions",
+      "candidate-open-actions",
+      "meeting-necessity-review",
+      "follow-up-need"
+    ]
+  },
+  "package": {
+    "createdAt": "2026-09-18T09:35:01+09:00",
+    "createdBy": "aletheia-meeting-transcriber/1.0.0",
+    "nonce": "AQIDBAUGBwgJCgsMDQ4PEA"
+  }
+}
