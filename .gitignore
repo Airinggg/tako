@@ -67,6 +67,9 @@ cowork/handoff/codex-*last*.txt
 /config/sync-log.jsonl
 /config/retention.json
 /config/meeting-inbox.json
+/config/meeting-import-state.json
+/config/meeting-import-receipts.jsonl
+/config/meeting-analysis-queue.json
 /backups/
 /config/.sync-daemon.lock
 

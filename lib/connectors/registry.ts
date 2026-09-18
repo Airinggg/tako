@@ -16,7 +16,7 @@
  * connector that replaced it. Import from here instead of redeclaring.
  */
 
-export type ConnectorName = "notion" | "slack" | "drive" | "discord" | "notes" | "cad";
+export type ConnectorName = "notion" | "slack" | "drive" | "discord" | "notes" | "cad" | "meetings";
 
 export type ConnectorDescriptor = {
   /** Config key in connectors.json, npm script suffix, and run.ts directory. */
@@ -36,6 +36,7 @@ export const CONNECTORS: readonly ConnectorDescriptor[] = [
   // File-based: every run re-reads a complete CAD metadata export rather than
   // following a cursor, so it runs less often than the API connectors.
   { name: "cad", needsToken: false, defaultIntervalSeconds: 900 },
+  { name: "meetings", needsToken: false, defaultIntervalSeconds: 600 },
 ];
 
 export const CONNECTOR_NAMES: readonly ConnectorName[] = CONNECTORS.map((c) => c.name);

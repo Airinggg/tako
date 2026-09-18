@@ -10,7 +10,7 @@ import {
 const repo = fileURLToPath(new URL("..", import.meta.url));
 
 test("every connector is named once and exposes a uniform shape", () => {
-  assert.deepEqual([...CONNECTOR_NAMES], ["notion", "slack", "drive", "discord", "notes", "cad"]);
+  assert.deepEqual([...CONNECTOR_NAMES], ["notion", "slack", "drive", "discord", "notes", "cad", "meetings"]);
   assert.equal(new Set(CONNECTOR_NAMES).size, CONNECTORS.length, "connector names must be unique");
   for (const c of CONNECTORS) {
     assert.equal(typeof c.needsToken, "boolean", `${c.name} must declare needsToken`);
@@ -28,12 +28,17 @@ test("only remote connectors require a token; file-based ones do not", () => {
   assert.deepEqual(needs, ["notion", "slack", "drive", "discord"]);
   assert.equal(connectorDescriptor("notes")?.needsToken, false);
   assert.equal(connectorDescriptor("cad")?.needsToken, false);
+  assert.equal(connectorDescriptor("meetings")?.needsToken, false);
 });
 
 test("cad re-reads a whole export, so it gets a slower default cadence", () => {
   assert.equal(connectorDescriptor("cad")?.defaultIntervalSeconds, 900);
   // API connectors fall through to the daemon's own default
   assert.equal(connectorDescriptor("notion")?.defaultIntervalSeconds, undefined);
+});
+
+test("meetings polls the local inbox conservatively", () => {
+  assert.equal(connectorDescriptor("meetings")?.defaultIntervalSeconds, 600);
 });
 
 test("every registered connector has a runner on disk and an npm script", () => {

@@ -8,7 +8,7 @@ test("no arguments and help flags select usage", () => {
 });
 
 test("connect accepts every connector and passes flags through", () => {
-  for (const connector of ["notion", "slack", "drive", "notes", "discord", "cad"]) {
+  for (const connector of ["notion", "slack", "drive", "notes", "discord", "cad", "meetings"]) {
     assert.deepEqual(dispatch(["connect", connector, "--full"]), {
       command: "connect", target: connector, flags: ["--full"],
     });

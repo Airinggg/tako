@@ -8,14 +8,16 @@ import {
 import { dueConnectors, type SyncIntervals, type SyncScheduleState } from "../lib/sync/schedule.ts";
 import { loadSyncState, saveSyncState } from "../lib/sync/state.ts";
 import { CONNECTORS, type ConnectorName } from "../lib/connectors/registry.ts";
+import { loadMeetingInboxConfig } from "../lib/connectors/shared/config.ts";
 
 const REPO = resolve(import.meta.dir, "..");
 const CONFIG_PATH = resolve(REPO, process.env.CONNECTORS_CONFIG_PATH ?? "config/connectors.json");
+const MEETING_CONFIG_PATH = resolve(REPO, process.env.MEETING_INBOX_CONFIG_PATH ?? "config/meeting-inbox.json");
 const STATE_PATH = resolve(REPO, process.env.SYNC_STATE_PATH ?? "config/sync-state.json");
 const LOCK_PATH = join(REPO, "config/.sync-daemon.lock");
 const DEFAULT_INTERVAL_SECONDS = 300;
 
-type ConnectorConfig = Record<string, unknown> & { subdir: string; intervalSeconds?: number };
+type ConnectorConfig = Record<string, unknown> & { subdirs: string[]; intervalSeconds?: number };
 type ParsedFlags = { once: boolean; intervalSeconds: number };
 
 let shuttingDown = false;
@@ -50,6 +52,14 @@ async function configuredConnectors(): Promise<Map<ConnectorName, ConnectorConfi
   const result = new Map<ConnectorName, ConnectorConfig>();
   const root = parsed as Record<string, unknown>;
   for (const { name, defaultIntervalSeconds } of CONNECTORS) {
+    if (name === "meetings") {
+      try {
+        const meetingConfig = await loadMeetingInboxConfig(MEETING_CONFIG_PATH);
+        const subdirs = [...new Set(meetingConfig.workspaces.filter((workspace) => workspace.enabled).map((workspace) => workspace.sourceId))];
+        if (subdirs.length) result.set(name, { subdirs, intervalSeconds: defaultIntervalSeconds });
+      } catch { /* optional meeting workflow is not enabled */ }
+      continue;
+    }
     const section = root[name];
     if (section === undefined) continue;
     if (!section || typeof section !== "object" || Array.isArray(section)) throw new Error(`${name} config must be an object`);
@@ -60,6 +70,7 @@ async function configuredConnectors(): Promise<Map<ConnectorName, ConnectorConfi
     }
     result.set(name, {
       ...config,
+      subdirs: [config.subdir as string],
       ...(config.intervalSeconds === undefined && defaultIntervalSeconds !== undefined
         ? { intervalSeconds: defaultIntervalSeconds }
         : {}),
@@ -130,21 +141,23 @@ async function processConnector(
     if (serving) log("serve", "stopped", { connector, pid: serving.pid, port: serving.port });
 
     phase = "sync";
-    log("gbrain_sync", "started", { connector, source: config.subdir });
-    await runChild(["bun", BRAIN_CLI, "sync", "--source", config.subdir, "--working-tree"], BRAIN_PACKAGE, brainEnv());
-    log("gbrain_sync", "succeeded", { connector, source: config.subdir });
+    for (const source of config.subdirs) {
+      log("gbrain_sync", "started", { connector, source });
+      await runChild(["bun", BRAIN_CLI, "sync", "--source", source, "--working-tree"], BRAIN_PACKAGE, brainEnv());
+      log("gbrain_sync", "succeeded", { connector, source });
+    }
 
     phase = "embed";
-    log("gbrain_embed", "started", { connector, source: config.subdir });
+    log("gbrain_embed", "started", { connector, sources: config.subdirs });
     await runChild(["bun", BRAIN_CLI, "embed", "--all"], BRAIN_PACKAGE, brainEnv());
-    log("gbrain_embed", "succeeded", { connector, source: config.subdir });
+    log("gbrain_embed", "succeeded", { connector, sources: config.subdirs });
 
     state[connector] = { lastRunAt: new Date().toISOString(), lastStatus: "success", consecutiveFailures: 0 };
   } catch (error) {
     if (!shuttingDown) {
       const failures = (state[connector]?.consecutiveFailures ?? 0) + 1;
       state[connector] = { lastRunAt: new Date().toISOString(), lastStatus: "failure", consecutiveFailures: failures };
-      log(phase, "failed", { connector, source: config.subdir, consecutiveFailures: failures, error: (error as Error).message });
+      log(phase, "failed", { connector, sources: config.subdirs, consecutiveFailures: failures, error: (error as Error).message });
     }
   } finally {
     if (serving) {

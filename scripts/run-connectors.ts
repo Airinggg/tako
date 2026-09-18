@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { CONNECTORS, connectorRunner } from "../lib/connectors/registry.ts";
 
 const configPath = process.env.CONNECTORS_CONFIG_PATH ?? "config/connectors.json";
+const meetingConfigPath = process.env.MEETING_INBOX_CONFIG_PATH ?? "config/meeting-inbox.json";
 let config: Record<string, Record<string, unknown>> = {};
 
 try {
@@ -12,7 +13,13 @@ try {
 }
 
 for (const { name, needsToken } of CONNECTORS) {
-  const section = config[name];
+  let section = config[name];
+  if (name === "meetings") {
+    try {
+      const meetingConfig = JSON.parse(await readFile(meetingConfigPath, "utf8"));
+      if (Array.isArray(meetingConfig.workspaces) && meetingConfig.workspaces.some((workspace: any) => workspace?.enabled === true)) section = { enabled: true };
+    } catch { /* optional local workflow is not configured */ }
+  }
   if (!section) {
     console.log(`[${name}] skipped: config block absent`);
     continue;
