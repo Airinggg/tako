@@ -5,6 +5,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
+import { categorizeText, type Department } from "../govern/categorize.ts";
 
 const REPO = join(import.meta.dir, "..", "..");
 const BRAIN_CLI = join(REPO, "packages/brain/src/cli.ts");
@@ -134,7 +135,7 @@ export function buildAnswerPrompt(
  *  model to answer strictly from them with per-fact citations. */
 export async function answerFromSource(
   question: string, source: string,
-  opts: { topK?: number; model?: string; home?: string; timeoutMs?: number } = {},
+  opts: { topK?: number; model?: string; home?: string; timeoutMs?: number; department?: Department } = {},
 ): Promise<QaResult> {
   const home = opts.home || gbrainHome();
   const topK = opts.topK ?? 3;
@@ -146,13 +147,20 @@ export async function answerFromSource(
     hits.split("\n").map((l) => l.match(/^\[[\d.]+\]\s+(\S+)/)?.[1]).filter((s): s is string => !!s && s.includes("/")),
   )];
   const content = retrieved.filter((s) => !s.startsWith("skills/"));
+  // Browsing-only department narrowing (lib/govern/categorize.ts) — classifies
+  // off the slug text itself (no extra page fetch); a wrong classification only
+  // misfiles a result for this filter, it never widens or restricts real access.
+  const pool = opts.department
+    ? content.filter((s) => categorizeText(s.replace(/[/_-]/g, " ")) === opts.department)
+    : content.length ? content : retrieved;
   const wantsLatest = asksForLatest(question);
   // "Latest" pulls from a wider relevance-ranked pool, then re-sorts by date —
   // BM25 has no notion of time, so the true most-recent page may rank well
   // below the topK cutoff on keyword relevance alone.
-  const candidates = (content.length ? content : retrieved).slice(0, wantsLatest ? 12 : topK);
+  const candidates = pool.slice(0, wantsLatest ? 12 : topK);
   if (!candidates.length) {
-    return { answer: "(no pages in this source matched the question)", pages: [], retrieved, ms: Date.now() - t0 };
+    const scope = opts.department ? "this category" : "this source";
+    return { answer: `(no pages in ${scope} matched the question)`, pages: [], retrieved, ms: Date.now() - t0 };
   }
 
   // Fetch once, in relevance order; latest-queries then re-rank by date. Raw

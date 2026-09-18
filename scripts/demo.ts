@@ -38,6 +38,7 @@ import { DEFAULT_POLICY, rollupLine, triage, type DecayPolicy, type Task } from 
 import { CHECK_KEYS, CHECK_LABELS, allowedVerdicts, canApprove, latestDecision, newReview, overallRisk, receiptLine, recordDecision, setCheck, VERDICTS, type ReviewItem, type Verdict } from "../lib/review/model.ts";
 import { resolveSecret } from "../lib/connectors/shared/config.ts";
 import { DEFAULT_RULES, redact, resolveRules, summariseHits, type RedactionRule } from "../lib/govern/redact.ts";
+import { categorizeText, DEPARTMENT_LABELS, DEPARTMENTS, type Department } from "../lib/govern/categorize.ts";
 import { diffGitStatus, formatSyncLogLines, hashContent, parseGitStatus, type SyncLogEntry } from "../lib/govern/sync-log.ts";
 import { checkRateLimit, ClientError, clientKey, readJsonBody, requireAdmin, resolveAdminToken, safeErrorResponse } from "../lib/util/http-security.ts";
 import { writePrivateFileAtomic } from "../lib/util/private-file.ts";
@@ -391,12 +392,17 @@ type ConnectorSpec = {
   /** when set, the `system` field keys an entry inside cfg[name][nested] rather
    *  than the connector being one flat block (used by the CAD connector). */
   nested?: string;
+  /** filename under docs/connectors/ with step-by-step token-acquisition
+   *  instructions for this connector — served read-only via the whitelisted
+   *  /docs/connectors/:file route below (see CREDENTIALS_DOCS). */
+  credentialsDoc?: string;
 };
 
 const CONNECTOR_SPECS: Record<string, ConnectorSpec> = {
   notion: {
     label: "Notion", category: "ドキュメント / Docs", hasToken: true, tokenLabel: "内部インテグレーションのトークン", tokenPh: "ntn_…",
     help: "Notion で内部インテグレーションを作成し、対象のデータベースに接続を共有します。",
+    credentialsDoc: "notion-credentials.md",
     fields: [
       { key: "databases", label: "データベースID", list: true, ph: "3ca943af75c88019a64bee683cb33662" },
       { key: "subdir", label: "取り込み先スコープ", def: "shared" },
@@ -406,6 +412,7 @@ const CONNECTOR_SPECS: Record<string, ConnectorSpec> = {
   slack: {
     label: "Slack", category: "チャット / Chat", hasToken: true, tokenLabel: "ボットトークン", tokenPh: "xoxb-…",
     help: "channels:history / channels:read / users:read 権限のボットを、読みたいチャンネルに招待します。",
+    credentialsDoc: "slack-credentials.md",
     fields: [
       { key: "channels", label: "チャンネル（IDまたは名前）", list: true, ph: "all-hestia" },
       { key: "subdir", label: "取り込み先スコープ", def: "engineering" },
@@ -416,6 +423,7 @@ const CONNECTOR_SPECS: Record<string, ConnectorSpec> = {
   drive: {
     label: "Google Drive", category: "ファイル / Files", hasToken: true, tokenLabel: "アクセストークン", tokenPh: "ya29.…",
     help: "drive.readonly スコープのトークン。フォルダ直下のファイルのみ取り込みます（サブフォルダは各IDを追加）。",
+    credentialsDoc: "drive-credentials.md",
     fields: [
       { key: "folderIds", label: "フォルダID", list: true, ph: "1ueXJLTio4EE9lhXS9uzifnsIPMAuLHQ_" },
       { key: "subdir", label: "取り込み先スコープ", def: "shared" },
@@ -425,6 +433,7 @@ const CONNECTOR_SPECS: Record<string, ConnectorSpec> = {
   discord: {
     label: "Discord", category: "チャット / Chat", hasToken: true, tokenLabel: "ボットトークン", tokenPh: "MTU0…",
     help: "ボットを対象サーバーに参加させ、Message Content Intent を有効にします。",
+    credentialsDoc: "discord-credentials.md",
     fields: [
       { key: "guildId", label: "サーバーID", ph: "1542488991729852516" },
       { key: "channels", label: "チャンネルID", list: true, ph: "1542488992279167090" },
@@ -488,6 +497,7 @@ function connectorsView() {
     const src = sourceRowsList.find((s) => s.source_id === c.subdir);
     return {
       name, label: spec.label, help: spec.help, category: spec.category,
+      credentialsDocUrl: spec.credentialsDoc ? `/docs/connectors/${spec.credentialsDoc}` : "",
       hasToken: spec.hasToken, tokenLabel: spec.tokenLabel, tokenPh: spec.tokenPh,
       tokenMasked: spec.hasToken ? maskToken(c.token) : "",
       configured,
@@ -1086,6 +1096,20 @@ if (import.meta.main) {
 
         if (url.pathname === "/") return new Response(PAGE, { headers: { "content-type": "text/html; charset=utf-8" } });
 
+        // Whitelisted, read-only credential guides. The path segment is
+        // matched against the exact filenames CONNECTOR_SPECS references —
+        // never resolved from the URL itself — so this cannot be used for
+        // directory traversal or to serve arbitrary repo files.
+        if (url.pathname.startsWith("/docs/connectors/")) {
+          const requested = url.pathname.slice("/docs/connectors/".length);
+          const known = new Set(Object.values(CONNECTOR_SPECS).map((s) => s.credentialsDoc).filter(Boolean));
+          if (known.has(requested)) {
+            const file = Bun.file(new URL(`../docs/connectors/${requested}`, import.meta.url));
+            return new Response(file, { headers: { "content-type": "text/markdown; charset=utf-8" } });
+          }
+          return new Response("Not found", { status: 404 });
+        }
+
         if (url.pathname === "/api/overview") {
           return json({ ...overviewCached(), worked: workedEntry });
         }
@@ -1094,12 +1118,13 @@ if (import.meta.main) {
           if (!checkRateLimit(`ask:${clientKey(req, server)}`, 10, 60_000)) {
             return json({ error: "too many requests, try again shortly" }, 429);
           }
-          const { question, source } = await readJsonBody<{ question?: string; source?: string }>(req);
+          const { question, source, category } = await readJsonBody<{ question?: string; source?: string; category?: string }>(req);
           const q = String(question ?? "").trim();
           if (!q) return json({ error: "質問を入力してください" }, 400);
           const src = String(source || DEFAULT_SOURCE);
-          const r = await answerFromSource(q, src, { model: MODEL, topK: 3 });
-          return json({ answer: r.answer, pages: r.pages, retrieved: r.retrieved, cited: citedSlugs(r.answer), ms: r.ms, source: src });
+          const dept = DEPARTMENTS.includes(category as Department) ? (category as Department) : undefined;
+          const r = await answerFromSource(q, src, { model: MODEL, topK: 3, department: dept });
+          return json({ answer: r.answer, pages: r.pages, retrieved: r.retrieved, cited: citedSlugs(r.answer), ms: r.ms, source: src, category: dept ?? null });
         }
 
         if (url.pathname === "/api/page") {
@@ -1889,6 +1914,11 @@ body { font-family: var(--tako-font); font-size: var(--tako-body); color: var(--
       <p class="hint" style="margin-top:22px">Tokens are stored in plaintext in this device's <span class="mono">config/connectors.json</span>.
       Production needs an encrypted credential store (onboarding gap #3).</p>
       <div class="request-bubble" role="note"><span class="plus">+</span><span><b>Request an integration</b></span></div>
+
+      <aside class="tako-panel" id="cx-credentials-panel" hidden>
+        <button class="tako-panel-close" id="cx-credentials-panel-close" aria-label="Close">×</button>
+        <div id="cx-credentials-panel-body"></div>
+      </aside>
     </section>
 
     <section class="section" data-name="ask">
@@ -1902,6 +1932,10 @@ body { font-family: var(--tako-font); font-size: var(--tako-body); color: var(--
           <label for="ask-src" style="font-size:12px;color:var(--ink-faint)">Source</label>
           <select id="ask-src"></select>
           <button class="file" type="submit">Ask</button>
+        </div>
+        <div class="tako-filter-row" id="ask-category-row" style="margin-top:10px;flex-wrap:wrap">
+          <button class="tako-filter" type="button" data-category="" aria-pressed="true" style="white-space:nowrap">All categories</button>
+          ${DEPARTMENTS.map((d) => `<button class="tako-filter" type="button" data-category="${d}" aria-pressed="false" style="white-space:nowrap">${DEPARTMENT_LABELS[d]}</button>`).join("")}
         </div>
       </form>
       <div id="ask-out"></div>
@@ -2082,6 +2116,35 @@ body { font-family: var(--tako-font); font-size: var(--tako-body); color: var(--
 const $=(s,r=document)=>r.querySelector(s);
 const $$=(s,r=document)=>[...r.querySelectorAll(s)];
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+/* Minimal Markdown → HTML for rendering our own docs/connectors/*.md guides
+   inside the app (headings, bold, inline code, code fences, links, lists,
+   paragraphs) — no dependency, and the input is our own repo content. */
+function mdToHtml(md){
+  const inline=s=>esc(s)
+    .replace(/\\\`([^\\\`]+)\\\`/g,'<code>$1</code>')
+    .replace(/\\*\\*([^*]+)\\*\\*/g,'<strong>$1</strong>')
+    .replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+  let html='',inCode=false,listOpen=null;
+  const closeList=()=>{if(listOpen){html+='</'+listOpen+'>';listOpen=null;}};
+  for(const raw of md.split('\\n')){
+    if(raw.trim().startsWith('\`\`\`')){
+      if(!inCode){closeList();html+='<pre><code>';inCode=true;}
+      else{html+='</code></pre>';inCode=false;}
+      continue;
+    }
+    if(inCode){html+=esc(raw)+'\\n';continue;}
+    const h=raw.match(/^(#{1,3})\\s+(.*)$/);
+    if(h){closeList();const n=h[1].length+1;html+='<h'+n+'>'+inline(h[2])+'</h'+n+'>';continue;}
+    const ol=raw.match(/^\\d+\\.\\s+(.*)$/);
+    if(ol){if(listOpen!=='ol'){closeList();html+='<ol>';listOpen='ol';}html+='<li>'+inline(ol[1])+'</li>';continue;}
+    const ul=raw.match(/^[-*]\\s+(.*)$/);
+    if(ul){if(listOpen!=='ul'){closeList();html+='<ul>';listOpen='ul';}html+='<li>'+inline(ul[1])+'</li>';continue;}
+    if(!raw.trim()){closeList();continue;}
+    closeList();html+='<p>'+inline(raw)+'</p>';
+  }
+  closeList();
+  return html;
+}
 const api=async(p,o)=>{const r=await fetch(p,o);const j=await r.json();if(!r.ok)throw new Error(j.error||'request failed');return j};
 /* Admin-gated mutating routes need an X-Admin-Token header. The page itself
    stays unauthenticated (public demo screens must stay reachable) — only these
@@ -2225,6 +2288,11 @@ async function loadHome(){
 }
 
 /* ── ask ── */
+let askCategory='';
+$$('#ask-category-row .tako-filter').forEach(btn=>btn.addEventListener('click',()=>{
+  askCategory=btn.dataset.category||'';
+  $$('#ask-category-row .tako-filter').forEach(b=>b.setAttribute('aria-pressed',String(b===btn)));
+}));
 $('#ask-form').addEventListener('submit',async e=>{
   e.preventDefault();
   const q=$('#ask-q').value.trim();if(!q)return;
@@ -2232,7 +2300,7 @@ $('#ask-form').addEventListener('submit',async e=>{
   const btn=$('button.file');btn.disabled=true;
   $('#ask-out').innerHTML='<div class="working"><span class="ring"></span>Checking your connected apps… the first run loads the model, 30–60s</div>';
   try{
-    const r=await api('/api/ask',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:q,source:src})});
+    const r=await api('/api/ask',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:q,source:src,category:askCategory})});
     $('#ask-out').innerHTML=entryHtml({question:q,...r},{stamp:true});
     wireCites($('#ask-out'));
   }catch(err){$('#ask-out').innerHTML='<div class="note-err">'+esc(err.message)+'</div>';}
@@ -2254,6 +2322,7 @@ function openPermissionsPanel(idx){
   $('#permissions-panel').hidden=false;
 }
 $('#permissions-panel-close')?.addEventListener('click',()=>{$('#permissions-panel').hidden=true;});
+$('#cx-credentials-panel-close')?.addEventListener('click',()=>{$('#cx-credentials-panel').hidden=true;});
 async function loadAccess(force){
   if(accessLoaded&&!force)return;accessLoaded=true;
   try{
@@ -2573,6 +2642,7 @@ function selectCx(name,openAdvanced){
       +'<div class="cx-summary-row"><span class="cx-summary-label">Feeds into</span><span>'+esc(r.subdir||'—')+'</span></div>'
       +'<div class="cx-summary-row"><span class="cx-summary-label">Last synced</span><span class="cx-lastsync">'+(r.lastSync?fmtDate(r.lastSync):'Never synced')+'</span></div>'
     +'</div>'
+    +(r.credentialsDocUrl?'<p class="hint cx-credentials-link"><button class="cx-credentials-btn" type="button" data-doc="'+esc(r.credentialsDocUrl)+'">Where do I get this token? →</button></p>':'')
     +'<div class="cx-summary-actions">'
       +'<button class="tako-btn tako-btn--primary cx-manage" type="button">Manage</button>'
       +(r.configured&&cxState.canSave?'<button class="tako-btn tako-btn--secondary cx-sync-now" type="button">Sync now</button>':'')
@@ -2592,6 +2662,17 @@ function selectCx(name,openAdvanced){
   panel.hidden=false;
   const advanced=$('.tako-advanced',panel);
   $('.cx-manage',panel).addEventListener('click',()=>{advanced.open=true;advanced.scrollIntoView({behavior:'smooth',block:'nearest'});});
+  const credsBtn=$('.cx-credentials-btn',panel);
+  if(credsBtn)credsBtn.addEventListener('click',async()=>{
+    const body=$('#cx-credentials-panel-body');
+    body.innerHTML='<p class="hint">Loading…</p>';
+    $('#cx-credentials-panel').hidden=false;
+    try{
+      const res=await fetch(credsBtn.dataset.doc);
+      if(!res.ok)throw new Error('Could not load this guide (HTTP '+res.status+').');
+      body.innerHTML=mdToHtml(await res.text());
+    }catch(e){body.innerHTML='<p class="note-err">'+esc(e.message)+'</p>';}
+  });
   const out=$('.out',panel);
   const vals=()=>{const o={name};$$('input[data-k]',panel).forEach(i=>o[i.dataset.k]=i.value);return o;};
   const save=$('.save',panel);

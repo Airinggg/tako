@@ -32,9 +32,11 @@ Tako never sends or publishes anything on its own.
 - Self-serve onboarding is built: `./bin/omnibrain doctor` checks a machine
   is ready (Bun version, Ollama reachable, required models pulled),
   `./bin/omnibrain setup` scaffolds `config/*.json` from the committed
-  `*.example.json` templates, and `docs/connectors/*-credentials.md` walks
-  through getting each connector's own API token from scratch. Google Drive
-  is a supervised-trial connector for now — see its guide for why.
+  `*.example.json` templates, and
+  [`docs/CONNECTOR_CREDENTIALS.md`](docs/CONNECTOR_CREDENTIALS.md) indexes
+  every connector's step-by-step token guide (also linked directly from the
+  Connected Apps screen in the app itself). Google Drive is a
+  supervised-trial connector for now — see its guide for why.
 - Security hardening against `docs/PROTOTYPE_SECURITY_CHECKLIST.md` is
   substantially done: the P0 (public-demo) gate is a clean GO, and most of
   the P1 (real-customer-pilot) items that matter for a single-tenant

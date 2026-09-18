@@ -1,5 +1,10 @@
 # GBrain connectors
 
+Need a connector's access token? See
+[`docs/CONNECTOR_CREDENTIALS.md`](../CONNECTOR_CREDENTIALS.md) for the
+per-service step-by-step guides (also linked from the Connected Apps screen
+in the app itself).
+
 ## Decision
 
 GBrain sources are **git-backed directories of Markdown files**. Git is the
