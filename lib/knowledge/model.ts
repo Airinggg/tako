@@ -164,3 +164,32 @@ export function recordReviewerDecision(
   // "escalated" leaves next.status as-is (still "under_review").
   return next;
 }
+
+/** A human re-confirms an approved item is still current, or updates when it
+ *  should next be checked, without that being a new formal review decision
+ *  (no reviewHistory entry — see spec Part B.4.4: freshness is cleared by a
+ *  human, but it is not itself a Verdict). */
+export function recordFreshnessCheck(item: KnowledgeItem, nextFreshnessReviewAt: string, now = new Date().toISOString()): KnowledgeItem {
+  const next = clone(item);
+  next.lastReviewedAt = now;
+  next.nextFreshnessReviewAt = nextFreshnessReviewAt;
+  return next;
+}
+
+/** True only for an approved item whose freshness-review date has passed —
+ *  a draft/rejected/superseded item is never "due," it is simply not
+ *  current trusted knowledge yet (or any more). */
+export function isDueForFreshnessReview(item: KnowledgeItem, now = new Date().toISOString()): boolean {
+  return item.status === "approved" && item.nextFreshnessReviewAt !== null && item.nextFreshnessReviewAt <= now;
+}
+
+/** An approved item is replaced by a newer one. The old item is retained
+ *  (never deleted) with status `superseded` and a relation pointing at its
+ *  replacement, so retrieval and citation history can still resolve it. */
+export function supersede(item: KnowledgeItem, supersededById: KnowledgeItemId, now = new Date().toISOString()): KnowledgeItem {
+  const next = clone(item);
+  next.status = "superseded";
+  next.relations = [...next.relations, { type: "superseded_by", targetId: supersededById }];
+  next.lastReviewedAt = now;
+  return next;
+}

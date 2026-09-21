@@ -125,3 +125,32 @@ test("recordReviewerDecision refuses any verdict once an item is approved or rej
   const rejected = recordReviewerDecision(markUnderReview(base(), "rev_7", NOW), "rejected", "Taro", "", NOW);
   assert.throws(() => recordReviewerDecision(rejected, "approved", "Grace", "", NOW), /terminal/);
 });
+
+import { isDueForFreshnessReview, recordFreshnessCheck, supersede } from "../lib/knowledge/model.ts";
+
+test("recordFreshnessCheck sets lastReviewedAt and nextFreshnessReviewAt without touching status or history", () => {
+  const approved = recordReviewerDecision(markUnderReview(base(), "rev_8", NOW), "approved", "Taro", "", NOW);
+  const rechecked = recordFreshnessCheck(approved, "2026-12-01T00:00:00.000Z", "2026-11-01T00:00:00.000Z");
+  assert.equal(rechecked.status, "approved");
+  assert.equal(rechecked.reviewHistory.length, 1); // unchanged
+  assert.equal(rechecked.lastReviewedAt, "2026-11-01T00:00:00.000Z");
+  assert.equal(rechecked.nextFreshnessReviewAt, "2026-12-01T00:00:00.000Z");
+});
+
+test("isDueForFreshnessReview is true only for an approved item past its review date", () => {
+  const approved = recordFreshnessCheck(
+    recordReviewerDecision(markUnderReview(base(), "rev_9", NOW), "approved", "Taro", "", NOW),
+    "2026-10-01T00:00:00.000Z",
+    NOW,
+  );
+  assert.equal(isDueForFreshnessReview(approved, "2026-09-30T00:00:00.000Z"), false);
+  assert.equal(isDueForFreshnessReview(approved, "2026-10-02T00:00:00.000Z"), true);
+  assert.equal(isDueForFreshnessReview(base(), "2099-01-01T00:00:00.000Z"), false, "a draft item is never 'due' for freshness review");
+});
+
+test("supersede marks the old item superseded and links to its replacement", () => {
+  const approved = recordReviewerDecision(markUnderReview(base(), "rev_10", NOW), "approved", "Taro", "", NOW);
+  const superseded = supersede(approved, "ki_new_replacement", "2026-11-01T00:00:00.000Z");
+  assert.equal(superseded.status, "superseded");
+  assert.deepEqual(superseded.relations, [{ type: "superseded_by", targetId: "ki_new_replacement" }]);
+});
