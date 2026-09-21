@@ -120,6 +120,7 @@ function overview() {
   return {
     model: usesHostedProvider() ? `${process.env.GEMINI_MODEL || "gemini-3.6-flash"} (external — demo mode)` : MODEL,
     localOnly: !usesHostedProvider(),
+    gbrainHome: gbrainHome(),
     totals: {
       sources: sources.length,
       docs: sources.reduce((n, s) => n + s.docs, 0),
@@ -2119,12 +2120,51 @@ body { font-family: var(--tako-font); font-size: var(--tako-body); color: var(--
 
     <section class="section" data-name="settings">
       <header class="tako-screen-head"><h1>Settings</h1></header>
-      <p class="tako-supporting">Not available in this view yet.</p>
+
+      <h2>Answer model</h2>
+      <div class="cx-summary">
+        <div class="cx-summary-row"><span class="cx-summary-label">Currently answering with</span><span id="settings-model">—</span></div>
+      </div>
+      <p class="hint">Switch between the local model and the demo-mode external model from <b>Ask Tako → Details</b>.</p>
+
+      <h2 style="margin-top:var(--tako-space-4)">Company brain</h2>
+      <div class="cx-summary">
+        <div class="cx-summary-row"><span class="cx-summary-label">Brain location</span><span id="settings-brain-home" class="mono">—</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Connected sources</span><span id="settings-sources">—</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Indexed documents</span><span id="settings-docs">—</span></div>
+      </div>
+      <p class="hint">Manage which apps feed the brain from <b>Connected Apps</b>.</p>
+
+      <h2 style="margin-top:var(--tako-space-4)">About</h2>
+      <p class="tako-supporting">Tako is an on-premise company knowledge register. It federates read-only
+      connections to your team's tools, answers questions using local models only, and never sends or
+      publishes anything without a named person's approval.</p>
     </section>
 
     <section class="section" data-name="help">
       <header class="tako-screen-head"><h1>Help</h1></header>
-      <p class="tako-supporting">Not available in this view yet.</p>
+
+      <h2>Quick tour</h2>
+      <div class="cx-summary">
+        <div class="cx-summary-row"><span class="cx-summary-label">Home</span><span>Today's activity and what needs you</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Ask Tako</span><span>Ask a question, get a cited answer from one connected source</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Automations</span><span>Teach Tako a trigger-and-steps routine</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Connected Apps</span><span>Connect an app and see its own credential guide</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Tasks</span><span>What's open across your connected sources, triaged</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Activity</span><span>Every action, human or automated, in one log</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Approvals</span><span>Every AI-drafted output waits here for a human decision</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Team & Permissions</span><span>Who can read what, scoped per person</span></div>
+      </div>
+
+      <h2 style="margin-top:var(--tako-space-4)">Connecting an app</h2>
+      <p class="tako-supporting">Open <b>Connected Apps</b>, choose a service, and click
+      <b>"Where do I get this token?"</b> on its card — each one opens a step-by-step guide for that
+      specific service, right inside the app.</p>
+
+      <h2 style="margin-top:var(--tako-space-4)">How an answer is checked</h2>
+      <p class="tako-supporting">質問 (Ask) → 検索 (Retrieve, cited) → 下書き (Draft, local model only)
+      → フィルタ (Filter / mask sensitive info) → 人間の承認 (Human approval — required). Tako never
+      skips the last step on its own.</p>
     </section>
 
   </div></main>
@@ -2295,6 +2335,10 @@ async function loadHome(){
     $('#ask-model').textContent=o.model;
     $('#ask-hosted-warning').hidden=o.localOnly!==false;
     $$('#ask-provider-row .tako-filter').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.provider===(o.localOnly===false?'gemini':'ollama'))));
+    $('#settings-model').textContent=o.model;
+    $('#settings-brain-home').textContent=o.gbrainHome||'—';
+    $('#settings-sources').textContent=o.totals.sources;
+    $('#settings-docs').textContent=o.totals.docs;
     // ask-source options — populated here since this is the one unconditional load on boot
     $('#ask-src').innerHTML=o.sources.map(s=>'<option value="'+esc(s.id)+'">'+esc(s.name)+' ('+s.docs+')</option>').join('');
 
