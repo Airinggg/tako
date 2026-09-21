@@ -3,7 +3,8 @@ import test from "node:test";
 import { existsSync, readFileSync, unlinkSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { NAV_GROUPS, activityView, renderActivityList, renderPage, readSkillFiles } from "../scripts/demo.ts";
+import { NAV_GROUPS, activityView, renderActivityList, renderPage, readSkillFiles, AB_TRIGGER_OPTIONS } from "../scripts/demo.ts";
+import { TRIGGER_NODE_TO_STRING } from "../lib/connectors/automation-canvas/adapter.ts";
 import { TAKO_COLORS, TAKO_CSS_TOKENS } from "../scripts/tako/tokens.ts";
 
 // scripts/demo.ts always resolves config/reviews.json against the real repo
@@ -376,4 +377,11 @@ test("readSkillFiles exposes verbatim procedure step text, not just a count", ()
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }
+});
+
+test("every adapter trigger string is one of the builder's real AB_TRIGGER_OPTIONS", () => {
+  for (const str of Object.values(TRIGGER_NODE_TO_STRING)) {
+    assert.ok(AB_TRIGGER_OPTIONS.includes(str), `"${str}" is not in AB_TRIGGER_OPTIONS`);
+  }
+  assert.equal(Object.values(TRIGGER_NODE_TO_STRING).length, AB_TRIGGER_OPTIONS.length);
 });

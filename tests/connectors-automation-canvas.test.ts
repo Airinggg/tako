@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { skillToEdge, edgeInputToAutomationPayload, TRIGGER_NODE_TO_STRING } from "../lib/connectors/automation-canvas/adapter.ts";
-import { AB_TRIGGER_OPTIONS } from "../scripts/demo.ts";
 
 test("skillToEdge maps a well-formed automation to a canvas edge", () => {
   const edge = skillToEdge({
@@ -57,11 +56,4 @@ test("skillToEdge and edgeInputToAutomationPayload round-trip for every trigger"
     const payload = edgeInputToAutomationPayload(edge!.triggerNode, edge!.actionSteps);
     assert.equal(payload.trigger, trigger);
   }
-});
-
-test("every adapter trigger string is one of the builder's real AB_TRIGGER_OPTIONS", () => {
-  for (const str of Object.values(TRIGGER_NODE_TO_STRING)) {
-    assert.ok(AB_TRIGGER_OPTIONS.includes(str), `"${str}" is not in AB_TRIGGER_OPTIONS`);
-  }
-  assert.equal(Object.values(TRIGGER_NODE_TO_STRING).length, AB_TRIGGER_OPTIONS.length);
 });
