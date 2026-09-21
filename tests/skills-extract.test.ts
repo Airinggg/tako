@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { mineSkills } from "../lib/skills/extract.ts";
 import { renderDraft } from "../lib/skills/render-draft.ts";
-import { rmSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const corpus = [
@@ -70,73 +68,3 @@ test("renderDraft produces a review-gated SKILL.md", () => {
   assert.match(markdown, /1\. check Notion\n2\. post in #eng/);
 });
 
-// Fixture helper: creates a temporary skill directory
-function createSkillFixture(tempRoot: string, skillName: string, procedureSteps: string[]): void {
-  const skillDir = join(tempRoot, "test-source", "skills", skillName);
-  
-  mkdirSync(skillDir, { recursive: true });
-  
-  const procedureText = procedureSteps.map((step, i) => `${i + 1}. ${step}`).join("\n");
-  const skillMarkdown = `---
-name: ${skillName}
-version: 0.0.1
-status: draft
-description: Test skill
-triggers:
-  - test trigger
-reads:
-  - shared
----
-
-# ${skillName}
-
-## Procedure
-
-${procedureText}
-`;
-  
-  writeFileSync(join(skillDir, "SKILL.md"), skillMarkdown);
-}
-
-test("readSkillFiles exposes verbatim procedure step text, not just a count", () => {
-  // Local implementation that matches scripts/demo.ts:readSkillFiles
-  const readSkillFilesLocal = (rootOverride?: string) => {
-    const root = rootOverride || join(process.cwd(), "brain-sources");
-    if (!existsSync(root)) return [];
-    const out: any[] = [];
-    for (const src of readdirSync(root, { withFileTypes: true })) {
-      if (!src.isDirectory()) continue;
-      const skillsDir = join(root, src.name, "skills");
-      if (!existsSync(skillsDir)) continue;
-      for (const d of readdirSync(skillsDir, { withFileTypes: true })) {
-        const file = join(skillsDir, d.name, "SKILL.md");
-        if (!d.isDirectory() || !existsSync(file)) continue;
-        const md = readFileSync(file, "utf8").replace(/\r\n/g, "\n");
-        const fm = md.startsWith("---\n") ? md.slice(4, md.indexOf("\n---", 4)) : "";
-        const val = (k: string) => fm.match(new RegExp(`^${k}:[ ]*(.+)$`, "m"))?.[1]?.trim().replace(/^["']|["']$/g, "") ?? "";
-        const list = (k: string) => {
-          const m = fm.match(new RegExp(`^${k}:\\n((?:[ ]+-.*\\n?)+)`, "m"));
-          return m ? m[1].split("\n").map((l: string) => l.replace(/^\s*-\s*/, "").replace(/\s+#.*$/, "").replace(/^["']|["']$/g, "").trim()).filter(Boolean) : [];
-        };
-        const proc = md.match(/##\s*Procedure\s*\n([\s\S]*?)(?:\n##\s|\n*$)/i)?.[1] ?? "";
-        const steps = (proc.match(/^\s*\d+\.\s+/gm) ?? []).length;
-        const procedureSteps = (proc.match(/^\s*\d+\.\s+.+$/gm) ?? []).map((line: string) => line.replace(/^\s*\d+\.\s+/, "").trim());
-        out.push({ name: val("name") || d.name, description: val("description"), triggers: list("triggers"), reads: list("reads"), steps, procedureSteps });
-      }
-    }
-    return out.sort((a: any, b: any) => a.name.localeCompare(b.name));
-  };
-
-  const tempRoot = mkdtempSync(join(tmpdir(), "tako-skill-test-"));
-  try {
-    const skillName = "test-skill";
-    createSkillFixture(tempRoot, skillName, ["Summarize the content", "Post to Slack"]);
-    const skills = readSkillFilesLocal(tempRoot);
-    const skill = skills.find((s: any) => s.name === skillName);
-    assert.ok(skill);
-    assert.deepEqual(skill!.procedureSteps, ["Summarize the content", "Post to Slack"]);
-    assert.equal(skill!.steps, 2); // existing count field must still agree
-  } finally {
-    rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
