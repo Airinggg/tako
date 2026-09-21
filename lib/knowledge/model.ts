@@ -113,3 +113,54 @@ export function canApproveKnowledgeItem(item: KnowledgeItem): { ok: boolean; rea
 export function latestReviewerDecision(item: KnowledgeItem): ReviewerDecisionRecord | null {
   return item.reviewHistory.length ? item.reviewHistory[item.reviewHistory.length - 1] : null;
 }
+
+/** draft -> under_review, linking the ReviewItem a reviewer will act on. */
+export function markUnderReview(item: KnowledgeItem, reviewItemId: string, now = new Date().toISOString()): KnowledgeItem {
+  const next = clone(item);
+  next.status = "under_review";
+  next.reviewItemId = reviewItemId;
+  return next;
+}
+
+/** Records a human reviewer's verdict. Append-only: a re-decision adds a new
+ *  entry to `reviewHistory` rather than overwriting the last one, mirroring
+ *  lib/review/model.ts's `decisions[]` design intent so no prior verdict's
+ *  by/at/note is ever lost. `approved` is only reachable when
+ *  `canApproveKnowledgeItem()` says the item is ready; `revise` sends the
+ *  item back to `draft` for rework; `rejected` is terminal but the item and
+ *  its full history remain readable; `escalated` leaves status unchanged
+ *  (still `under_review`) since KnowledgeStatus has no separate escalated
+ *  state — the escalation itself is the new reviewHistory entry. `approved`
+ *  and `rejected` are terminal: no further decision may be recorded. */
+export function recordReviewerDecision(
+  item: KnowledgeItem,
+  verdict: ReviewVerdict,
+  by: string,
+  note = "",
+  now = new Date().toISOString(),
+): KnowledgeItem {
+  if (item.status === "rejected") {
+    throw new Error(`knowledge item "${item.id}" is terminal (status "${item.status}") and cannot receive another decision`);
+  }
+  if (item.status === "approved" && verdict !== "approved") {
+    throw new Error(`knowledge item "${item.id}" is terminal (status "${item.status}") and cannot receive another decision`);
+  }
+  if (verdict === "approved") {
+    const gate = canApproveKnowledgeItem(item);
+    if (!gate.ok) throw new Error(`cannot approve "${item.id}": ${gate.reasons.join("; ")}`);
+  }
+  const next = clone(item);
+  next.reviewHistory = [...next.reviewHistory, { verdict, by, at: now, note: note.trim() }];
+  if (verdict === "approved") {
+    next.status = "approved";
+    next.lastReviewedAt = now;
+  } else if (verdict === "rejected") {
+    next.status = "rejected";
+    next.lastReviewedAt = now;
+  } else if (verdict === "revise") {
+    next.status = "draft";
+    next.lastReviewedAt = now;
+  }
+  // "escalated" leaves next.status as-is (still "under_review").
+  return next;
+}
