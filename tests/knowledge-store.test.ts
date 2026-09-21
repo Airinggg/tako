@@ -49,3 +49,37 @@ test("saveKnowledgeItems writes atomically, owner-only, and round-trips", { skip
     await rm(dir, { recursive: true });
   }
 });
+
+import { getKnowledgeItem, upsertKnowledgeItem } from "../lib/knowledge/store.ts";
+import { recordReviewerDecision, markUnderReview } from "../lib/knowledge/model.ts";
+
+test("upsertKnowledgeItem inserts a new item and updates an existing one by id", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "tako-knowledge-store-"));
+  const path = join(dir, "knowledge-items.json");
+  try {
+    const item = sampleItem();
+    upsertKnowledgeItem(item, path);
+    assert.deepEqual(loadKnowledgeItems(path), [item]);
+
+    const approved = recordReviewerDecision(markUnderReview(item, "rev_1", NOW), "approved", "Taro", "", NOW);
+    upsertKnowledgeItem(approved, path);
+    const stored = loadKnowledgeItems(path);
+    assert.equal(stored.length, 1, "same id must update in place, not append a duplicate row");
+    assert.equal(stored[0].status, "approved");
+  } finally {
+    await rm(dir, { recursive: true });
+  }
+});
+
+test("getKnowledgeItem finds an item by id or returns undefined", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "tako-knowledge-store-"));
+  const path = join(dir, "knowledge-items.json");
+  try {
+    const item = sampleItem();
+    upsertKnowledgeItem(item, path);
+    assert.deepEqual(getKnowledgeItem(item.id, path), item);
+    assert.equal(getKnowledgeItem("ki_does_not_exist", path), undefined);
+  } finally {
+    await rm(dir, { recursive: true });
+  }
+});

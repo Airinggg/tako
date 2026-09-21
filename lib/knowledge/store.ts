@@ -62,3 +62,19 @@ export function saveKnowledgeItems(items: readonly KnowledgeItem[], path: string
   const file: KnowledgeStoreFile = { items: [...items] };
   writePrivateFileAtomic(path, `${JSON.stringify(file, null, 2)}\n`);
 }
+
+/** Insert-or-replace by id, then persist the whole store atomically.
+ *  Returns the resulting full list, matching lib/review/model.ts-adjacent
+ *  callers' habit of reading back the post-write state without a second
+ *  disk read. */
+export function upsertKnowledgeItem(item: KnowledgeItem, path: string = DEFAULT_KNOWLEDGE_STORE_PATH): KnowledgeItem[] {
+  const items = loadKnowledgeItems(path);
+  const idx = items.findIndex((i) => i.id === item.id);
+  const next = idx >= 0 ? [...items.slice(0, idx), item, ...items.slice(idx + 1)] : [...items, item];
+  saveKnowledgeItems(next, path);
+  return next;
+}
+
+export function getKnowledgeItem(id: string, path: string = DEFAULT_KNOWLEDGE_STORE_PATH): KnowledgeItem | undefined {
+  return loadKnowledgeItems(path).find((i) => i.id === id);
+}
