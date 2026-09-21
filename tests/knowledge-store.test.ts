@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readdirSync } from "node:fs";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -79,6 +80,55 @@ test("getKnowledgeItem finds an item by id or returns undefined", async () => {
     upsertKnowledgeItem(item, path);
     assert.deepEqual(getKnowledgeItem(item.id, path), item);
     assert.equal(getKnowledgeItem("ki_does_not_exist", path), undefined);
+  } finally {
+    await rm(dir, { recursive: true });
+  }
+});
+
+test("upsertKnowledgeItem backs up a corrupt destination file before overwriting it, instead of silently destroying it", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "tako-knowledge-store-"));
+  const path = join(dir, "knowledge-items.json");
+  const corruptBytes = "not json at all\n";
+  try {
+    await writeFile(path, corruptBytes);
+    const item = sampleItem();
+    const result = upsertKnowledgeItem(item, path);
+
+    // (a) the upsert still succeeds and the new item is in the store.
+    assert.deepEqual(result, [item]);
+    assert.deepEqual(loadKnowledgeItems(path), [item]);
+
+    // (b) a .corrupt-*.bak file now exists next to it with the original bytes.
+    const backups = readdirSync(dir).filter((f) => f.includes(".corrupt-") && f.endsWith(".bak"));
+    assert.equal(backups.length, 1, "expected exactly one corrupt backup file");
+    const backedUp = await readFile(join(dir, backups[0]), "utf8");
+    assert.equal(backedUp, corruptBytes);
+  } finally {
+    await rm(dir, { recursive: true });
+  }
+});
+
+test("loadKnowledgeItems filters out a row whose retention is an array, not an object", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "tako-knowledge-store-"));
+  const path = join(dir, "knowledge-items.json");
+  try {
+    const valid = sampleItem();
+    const invalid = { ...sampleItem(), id: "ki_bad_retention", retention: [] };
+    await writeFile(path, `${JSON.stringify({ items: [valid, invalid] }, null, 2)}\n`);
+    assert.deepEqual(loadKnowledgeItems(path), [valid]);
+  } finally {
+    await rm(dir, { recursive: true });
+  }
+});
+
+test("loadKnowledgeItems filters out a row with an invalid classification value", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "tako-knowledge-store-"));
+  const path = join(dir, "knowledge-items.json");
+  try {
+    const valid = sampleItem();
+    const invalid = { ...sampleItem(), id: "ki_bad_classification", classification: "not-a-real-class" };
+    await writeFile(path, `${JSON.stringify({ items: [valid, invalid] }, null, 2)}\n`);
+    assert.deepEqual(loadKnowledgeItems(path), [valid]);
   } finally {
     await rm(dir, { recursive: true });
   }
