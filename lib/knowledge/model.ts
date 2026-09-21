@@ -8,6 +8,8 @@
  * Part B.3–B.4.
  */
 
+import { randomUUID } from "node:crypto";
+
 export type KnowledgeItemId = string;
 
 export type KnowledgeType =
@@ -28,8 +30,14 @@ export const KNOWLEDGE_STATUSES: KnowledgeStatus[] = [
 
 export type KnowledgeOrigin = "source-authored" | "human-authored" | "model-suggested";
 
+export const KNOWLEDGE_ORIGINS: KnowledgeOrigin[] = ["source-authored", "human-authored", "model-suggested"];
+
 export type KnowledgeClassification =
   | "internal" | "confidential" | "restricted" | "public" | "export-controlled";
+
+export const KNOWLEDGE_CLASSIFICATIONS: KnowledgeClassification[] = [
+  "internal", "confidential", "restricted", "public", "export-controlled",
+];
 
 export type EvidenceAnchor = { pageSlug: string; chunkIndex?: number; excerpt?: string };
 
@@ -78,7 +86,7 @@ export function newKnowledgeItem(
 ): KnowledgeItem {
   const now = input.now ?? new Date().toISOString();
   return {
-    id: input.id ?? `ki_${(Date.parse(now) || 0).toString(36)}_${input.title.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 24) || "item"}`,
+    id: input.id ?? `ki_${(Date.parse(now) || 0).toString(36)}_${input.title.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 24) || "item"}_${randomUUID().slice(0, 8)}`,
     type: input.type,
     title: input.title.trim(),
     description: input.description.trim(),
@@ -130,8 +138,14 @@ export function markUnderReview(item: KnowledgeItem, reviewItemId: string, now =
  *  item back to `draft` for rework; `rejected` is terminal but the item and
  *  its full history remain readable; `escalated` leaves status unchanged
  *  (still `under_review`) since KnowledgeStatus has no separate escalated
- *  state — the escalation itself is the new reviewHistory entry. `approved`
- *  and `rejected` are terminal: no further decision may be recorded. */
+ *  state — the escalation itself is the new reviewHistory entry. `rejected`
+ *  is strictly terminal: no further decision of any kind may be recorded.
+ *  An already-`approved` item is not otherwise terminal — it accepts one
+ *  more `"approved"` verdict as a re-confirmation (it appends to
+ *  `reviewHistory` and refreshes `lastReviewedAt`), but any other verdict on
+ *  an approved item still throws. A decision can only be recorded on an item
+ *  that is `under_review` (i.e. has gone through `markUnderReview()`), and
+ *  `by` must be a non-blank named reviewer. */
 export function recordReviewerDecision(
   item: KnowledgeItem,
   verdict: ReviewVerdict,
@@ -144,6 +158,15 @@ export function recordReviewerDecision(
   }
   if (item.status === "approved" && verdict !== "approved") {
     throw new Error(`knowledge item "${item.id}" is terminal (status "${item.status}") and cannot receive another decision`);
+  }
+  // An already-`approved` item reaching here is being re-confirmed with
+  // another "approved" verdict, which is allowed without having gone back
+  // through `markUnderReview()`. Any other status must first be under_review.
+  if (item.status !== "under_review" && item.status !== "approved") {
+    throw new Error(`knowledge item "${item.id}" must be under_review before a decision can be recorded (current status: "${item.status}")`);
+  }
+  if (by.trim() === "") {
+    throw new Error(`recordReviewerDecision requires a named reviewer ("by")`);
   }
   if (verdict === "approved") {
     const gate = canApproveKnowledgeItem(item);

@@ -37,6 +37,12 @@ test("newKnowledgeItem starts in draft with no review history and a stable id pr
   assert.equal(item.nextFreshnessReviewAt, null);
 });
 
+test("newKnowledgeItem gives different ids to items with the same injected `now` and a shared 24+ char title prefix", () => {
+  const a = base({ title: "Quarterly security review process for vendors" });
+  const b = base({ title: "Quarterly security review process for contractors" });
+  assert.notEqual(a.id, b.id);
+});
+
 test("KNOWLEDGE_TYPES and KNOWLEDGE_STATUSES list the 8 types and 6 statuses the spec defines", () => {
   assert.deepEqual(KNOWLEDGE_TYPES, [
     "policy", "procedure", "decision", "project",
@@ -124,6 +130,26 @@ test("recordReviewerDecision refuses any verdict once an item is approved or rej
 
   const rejected = recordReviewerDecision(markUnderReview(base(), "rev_7", NOW), "rejected", "Taro", "", NOW);
   assert.throws(() => recordReviewerDecision(rejected, "approved", "Grace", "", NOW), /terminal/);
+});
+
+test("recordReviewerDecision throws when called on an item that never went through markUnderReview", () => {
+  const draft = base();
+  assert.throws(
+    () => recordReviewerDecision(draft, "approved", "Taro", "", NOW),
+    /must be under_review/,
+  );
+});
+
+test("recordReviewerDecision throws when `by` is blank, even on an under_review item", () => {
+  const reviewed = markUnderReview(base(), "rev_blank", NOW);
+  assert.throws(
+    () => recordReviewerDecision(reviewed, "approved", "", "", NOW),
+    /requires a named reviewer/,
+  );
+  assert.throws(
+    () => recordReviewerDecision(reviewed, "approved", "   ", "", NOW),
+    /requires a named reviewer/,
+  );
 });
 
 import { isDueForFreshnessReview, recordFreshnessCheck, supersede } from "../lib/knowledge/model.ts";
