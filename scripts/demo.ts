@@ -43,7 +43,7 @@ import { diffGitStatus, formatSyncLogLines, hashContent, parseGitStatus, type Sy
 import { checkRateLimit, ClientError, clientKey, readJsonBody, requireAdmin, resolveAdminToken, safeErrorResponse } from "../lib/util/http-security.ts";
 import { writePrivateFileAtomic } from "../lib/util/private-file.ts";
 
-const REPO = join(import.meta.dir, "..");
+const REPO = import.meta.dir ? join(import.meta.dir, "..") : process.cwd();
 
 const PORT = Number(process.env.PORT) || 4400;
 const MODEL = process.env.ASK_MODEL || "qwen2.5:3b-instruct";
@@ -144,8 +144,8 @@ type SkillView = {
   status: string; lastRun: string | null; owner: string; approvalRequired: string;
 };
 
-function readSkillFiles(): Omit<SkillView, "grantedBy" | "trigger" | "actionSummary" | "connectedApps" | "status" | "lastRun" | "owner" | "approvalRequired">[] {
-  const root = join(REPO, "brain-sources");
+export function readSkillFiles(rootOverride?: string): Omit<SkillView, "grantedBy" | "trigger" | "actionSummary" | "connectedApps" | "status" | "lastRun" | "owner" | "approvalRequired">[] {
+  const root = rootOverride || join(REPO, "brain-sources");
   if (!existsSync(root)) return [];
   const out: Omit<SkillView, "grantedBy" | "trigger" | "actionSummary" | "connectedApps" | "status" | "lastRun" | "owner" | "approvalRequired">[] = [];
   for (const src of readdirSync(root, { withFileTypes: true })) {
