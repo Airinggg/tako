@@ -71,3 +71,6 @@ cowork/handoff/codex-*last*.txt
 
 # auto-extracted skill drafts (content-derived, review locally)
 /skill-drafts/
+
+# local git worktrees for isolated plan execution
+/.worktrees/
