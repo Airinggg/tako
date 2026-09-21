@@ -193,3 +193,12 @@ export function supersede(item: KnowledgeItem, supersededById: KnowledgeItemId, 
   next.lastReviewedAt = now;
   return next;
 }
+
+/** One-line audit entry, mirroring lib/review/model.ts's receiptLine() —
+ *  what a reviewer or steward would paste into an audit note. */
+export function receiptLine(item: KnowledgeItem): string {
+  const d = latestReviewerDecision(item);
+  const head = d ? `${d.verdict} by ${d.by} on ${d.at.slice(0, 10)}` : `pending (${item.status})`;
+  const tail = d?.note ? ` — ${d.note}` : "";
+  return `${head} — type:${item.type} — owner:${item.ownerId || "(none)"} — evidence:${item.evidence.length}${tail}`;
+}

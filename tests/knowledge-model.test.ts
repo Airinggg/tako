@@ -154,3 +154,13 @@ test("supersede marks the old item superseded and links to its replacement", () 
   assert.equal(superseded.status, "superseded");
   assert.deepEqual(superseded.relations, [{ type: "superseded_by", targetId: "ki_new_replacement" }]);
 });
+
+import { receiptLine } from "../lib/knowledge/model.ts";
+
+test("receiptLine renders a one-line audit summary matching lib/review/model.ts's style", () => {
+  const draft = base();
+  assert.match(receiptLine(draft), /^pending \(draft\) — type:procedure — owner:grace@example\.com — evidence:1$/);
+
+  const approved = recordReviewerDecision(markUnderReview(base(), "rev_11", NOW), "approved", "Taro", "confirmed", "2026-09-23T00:00:00.000Z");
+  assert.match(receiptLine(approved), /^approved by Taro on 2026-09-23 — type:procedure — owner:grace@example\.com — evidence:1 — confirmed$/);
+});
