@@ -27,7 +27,7 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { TAKO_CSS_TOKENS } from "./tako/tokens.ts";
 import { mascotScene, mascotMark } from "./tako/mascot.ts";
-import { answerFromSource, citedSlugs, gb, gbrainHome } from "../lib/eval/qa.ts";
+import { answerFromSource, citedSlugs, gb, gbrainHome, usesHostedProvider } from "../lib/eval/qa.ts";
 import { loadDashboard, loadMembers } from "../lib/console/data.ts";
 import { connectorRunner, isConnectorName } from "../lib/connectors/registry.ts";
 import { parseSkill } from "../lib/skills/parse.ts";
@@ -241,8 +241,8 @@ function generateAutomationSlug(action1: string, action2: string): string {
 // server-side so createAutomation can reject anything that isn't one of
 // these (the client script below interpolates the same arrays rather than
 // hardcoding its own copy, so the two can never drift apart).
-const AB_TRIGGER_OPTIONS = ["New file added to Drive", "New page added to Notion", "New message in Slack", "Every Monday morning", "Manual"];
-const AB_ACTION_OPTIONS = ["Summarize the content", "Draft a notification", "Run the decision audit", "Post to Slack", "Notify the team channel", "Send an email digest"];
+export const AB_TRIGGER_OPTIONS = ["New file added to Drive", "New page added to Notion", "New message in Slack", "Every Monday morning", "Manual"];
+export const AB_ACTION_OPTIONS = ["Summarize the content", "Draft a notification", "Run the decision audit", "Post to Slack", "Notify the team channel", "Send an email digest"];
 
 /** Create a real automation by writing a new SKILL.md — completing the
  * Task 6 builder, which could pick a trigger/action pair but never had a way
@@ -1080,6 +1080,7 @@ const ADMIN_ROUTES = new Set([
   "/api/connectors/save",
   "/api/connectors/test",
   "/api/connectors/sync",
+  "/api/ask-provider",
 ]);
 
 if (import.meta.main) {
