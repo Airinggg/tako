@@ -27,7 +27,7 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { TAKO_CSS_TOKENS } from "./tako/tokens.ts";
 import { mascotScene, mascotMark } from "./tako/mascot.ts";
-import { answerFromSource, citedSlugs, gb, gbrainHome } from "../lib/eval/qa.ts";
+import { answerFromSource, citedSlugs, gb, gbrainHome, usesHostedProvider } from "../lib/eval/qa.ts";
 import { loadDashboard, loadMembers } from "../lib/console/data.ts";
 import { connectorRunner, isConnectorName } from "../lib/connectors/registry.ts";
 import { parseSkill } from "../lib/skills/parse.ts";
@@ -118,8 +118,8 @@ function overview() {
   };
 
   return {
-    model: MODEL,
-    localOnly: true,
+    model: usesHostedProvider() ? `${process.env.GEMINI_MODEL || "gemini-3.6-flash"} (external — demo mode)` : MODEL,
+    localOnly: !usesHostedProvider(),
     totals: {
       sources: sources.length,
       docs: sources.reduce((n, s) => n + s.docs, 0),
@@ -137,7 +137,7 @@ function overview() {
 // "skills declare the data access they assume, reviewed once.")
 type SkillView = {
   name: string; description: string; triggers: string[];
-  reads: string[]; steps: number; grantedBy: string[];
+  reads: string[]; steps: number; procedureSteps: string[]; grantedBy: string[];
   // Automations-screen fields (Task 6) — each derived from data already read
   // above, never fabricated. See skillsView() for how each is computed.
   trigger: string; actionSummary: string; connectedApps: string[];
@@ -164,7 +164,9 @@ function readSkillFiles(): Omit<SkillView, "grantedBy" | "trigger" | "actionSumm
       };
       const proc = md.match(/##\s*Procedure\s*\n([\s\S]*?)(?:\n##\s|\n*$)/i)?.[1] ?? "";
       const steps = (proc.match(/^\s*\d+\.\s+/gm) ?? []).length;
-      out.push({ name: val("name") || d.name, description: val("description"), triggers: list("triggers"), reads: list("reads"), steps });
+      const procedureSteps = (proc.match(/^\s*\d+\.\s+.+$/gm) ?? [])
+        .map((line) => line.replace(/^\s*\d+\.\s+/, "").trim());
+      out.push({ name: val("name") || d.name, description: val("description"), triggers: list("triggers"), reads: list("reads"), steps, procedureSteps });
     }
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));
@@ -1078,6 +1080,7 @@ const ADMIN_ROUTES = new Set([
   "/api/connectors/save",
   "/api/connectors/test",
   "/api/connectors/sync",
+  "/api/ask-provider",
 ]);
 
 if (import.meta.main) {
@@ -1123,8 +1126,23 @@ if (import.meta.main) {
           if (!q) return json({ error: "質問を入力してください" }, 400);
           const src = String(source || DEFAULT_SOURCE);
           const dept = DEPARTMENTS.includes(category as Department) ? (category as Department) : undefined;
-          const r = await answerFromSource(q, src, { model: MODEL, topK: 3, department: dept });
+          const r = await answerFromSource(q, src, { model: MODEL, department: dept });
           return json({ answer: r.answer, pages: r.pages, retrieved: r.retrieved, cited: citedSlugs(r.answer), ms: r.ms, source: src, category: dept ?? null });
+        }
+
+        if (url.pathname === "/api/ask-provider" && req.method === "POST") {
+          const { provider } = await readJsonBody<{ provider?: string }>(req);
+          if (provider !== "ollama" && provider !== "gemini") {
+            return json({ error: 'provider must be "ollama" or "gemini"' }, 400);
+          }
+          if (provider === "gemini" && !process.env.GEMINI_API_KEY) {
+            return json({ error: "GEMINI_API_KEY is not set — add it to .env and restart before switching to Gemini" }, 400);
+          }
+          // In-memory only, not persisted to .env — a real server restart
+          // always falls back to .env's own setting, so a demo session can
+          // never accidentally leave hosted-provider mode on permanently.
+          process.env.ASK_PROVIDER = provider;
+          return json({ ok: true, provider, localOnly: !usesHostedProvider() });
         }
 
         if (url.pathname === "/api/page") {
@@ -1218,7 +1236,9 @@ if (import.meta.main) {
 
   console.log(`\n  tako demo  →  http://localhost:${PORT}`);
   console.log(`  model: ${MODEL}   ·   default source: ${DEFAULT_SOURCE}   ·   GBRAIN_HOME=${gbrainHome()}`);
-  console.log(`  local only — retrieval and synthesis both run on Ollama, nothing leaves this machine\n`);
+  console.log(usesHostedProvider()
+    ? `  ⚠ DEMO MODE — synthesis is routed to an external API (Gemini), not local Ollama. Do not use with real customer data.\n`
+    : `  local only — retrieval and synthesis both run on Ollama, nothing leaves this machine\n`);
   // Pre-warm the blocking reads so the stage machine's first paint is instant.
   // The Overview's worked entry stays the hand-verified canned copy — the live
   // 3B model is (correctly) shown only in the Ask tab, where the presenter drives
@@ -1938,10 +1958,17 @@ body { font-family: var(--tako-font); font-size: var(--tako-body); color: var(--
           ${DEPARTMENTS.map((d) => `<button class="tako-filter" type="button" data-category="${d}" aria-pressed="false" style="white-space:nowrap">${DEPARTMENT_LABELS[d]}</button>`).join("")}
         </div>
       </form>
+      <div class="tako-filter-row" id="ask-provider-row" style="margin-top:10px;align-items:center;gap:8px">
+        <span class="hint" style="margin:0">Model:</span>
+        <button class="tako-filter" type="button" data-provider="ollama" aria-pressed="true">Ollama (local)</button>
+        <button class="tako-filter" type="button" data-provider="gemini" aria-pressed="false">Gemini (external, demo-only)</button>
+      </div>
+      <p class="hint" id="ask-hosted-warning" hidden style="color:var(--tako-danger,#b00);font-weight:600">⚠ Demo mode: this question and the retrieved document content are sent to an external API (Gemini), not processed locally.</p>
+      <p class="out" id="ask-provider-out" hidden></p>
       <div id="ask-out"></div>
       <details class="tako-advanced">
         <summary>Details</summary>
-        <p class="hint">Answers only from your connected sources, run on a local model ・ <span id="ask-model">—</span></p>
+        <p class="hint">Answers only from your connected sources ・ <span id="ask-model">—</span></p>
       </details>
     </section>
 
@@ -2266,6 +2293,8 @@ async function loadHome(){
   try{
     const o=await api('/api/overview');
     $('#ask-model').textContent=o.model;
+    $('#ask-hosted-warning').hidden=o.localOnly!==false;
+    $$('#ask-provider-row .tako-filter').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.provider===(o.localOnly===false?'gemini':'ollama'))));
     // ask-source options — populated here since this is the one unconditional load on boot
     $('#ask-src').innerHTML=o.sources.map(s=>'<option value="'+esc(s.id)+'">'+esc(s.name)+' ('+s.docs+')</option>').join('');
 
@@ -2293,12 +2322,24 @@ $$('#ask-category-row .tako-filter').forEach(btn=>btn.addEventListener('click',(
   askCategory=btn.dataset.category||'';
   $$('#ask-category-row .tako-filter').forEach(b=>b.setAttribute('aria-pressed',String(b===btn)));
 }));
+$$('#ask-provider-row .tako-filter').forEach(btn=>btn.addEventListener('click',async()=>{
+  const provider=btn.dataset.provider;
+  const out=$('#ask-provider-out');
+  out.hidden=false;out.className='out';out.textContent='Switching…';
+  try{
+    const r=await adminApi('/api/ask-provider',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({provider})});
+    $$('#ask-provider-row .tako-filter').forEach(b=>b.setAttribute('aria-pressed',String(b===btn)));
+    $('#ask-hosted-warning').hidden=r.localOnly!==false;
+    out.className='out ok';out.textContent='Switched to '+provider+' — takes effect on your next question.';
+    loadHome(true);
+  }catch(e){out.className='out bad';out.textContent=e.message;}
+}));
 $('#ask-form').addEventListener('submit',async e=>{
   e.preventDefault();
   const q=$('#ask-q').value.trim();if(!q)return;
   const src=$('#ask-src').value;
   const btn=$('button.file');btn.disabled=true;
-  $('#ask-out').innerHTML='<div class="working"><span class="ring"></span>Checking your connected apps… the first run loads the model, 30–60s</div>';
+  $('#ask-out').innerHTML='<div class="working"><span class="ring"></span>Checking your connected apps…</div>';
   try{
     const r=await api('/api/ask',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:q,source:src,category:askCategory})});
     $('#ask-out').innerHTML=entryHtml({question:q,...r},{stamp:true});
