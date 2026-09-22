@@ -39,8 +39,8 @@ const KEYWORDS: Record<Exclude<Department, "general">, string[]> = {
     "設計", "実装", "バグ", "デプロイ",
   ],
   sales: [
-    "pipeline", "quote", "proposal", "lead", "customer", "deal", "contract renewal", "crm",
-    "見積", "商談", "顧客", "契約更新",
+    "pipeline", "quote", "proposal", "lead", "deal", "contract renewal", "crm", "prospect",
+    "見積", "商談", "契約更新", "案件",
   ],
   legal: [
     "contract", "nda", "compliance", "liability", "terms of service", "regulation", "clause",
@@ -52,6 +52,14 @@ const KEYWORDS: Record<Exclude<Department, "general">, string[]> = {
   ],
 };
 
+// A department's own English name appearing literally in the text (e.g. a
+// channel or folder actually named "...-sales...") is a much stronger
+// signal than an incidental topic keyword — score it heavily enough that it
+// reliably wins over a single generic keyword hit elsewhere (see: a
+// "customer-support" channel must not out-score an actual "sales" channel
+// just because "customer" happens to be a sales-adjacent word).
+const NAME_MATCH_WEIGHT = 5;
+
 /** Classifies free text into one department using keyword-hit scoring. Ties
  *  and no-match both fall back to "general" rather than guessing. */
 export function categorizeText(text: string): Department {
@@ -59,7 +67,7 @@ export function categorizeText(text: string): Department {
   const scores = {} as Record<Exclude<Department, "general">, number>;
   let bestScore = 0;
   for (const dept of Object.keys(KEYWORDS) as Exclude<Department, "general">[]) {
-    let score = 0;
+    let score = lower.includes(dept) ? NAME_MATCH_WEIGHT : 0;
     for (const kw of KEYWORDS[dept]) {
       if (lower.includes(kw.toLowerCase())) score++;
     }
