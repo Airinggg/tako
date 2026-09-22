@@ -2154,6 +2154,22 @@ body { font-family: var(--tako-font); font-size: var(--tako-body); color: var(--
         <p>Automation created</p>
         <p class="tako-supporting">It will run the next time its trigger happens.</p>
       </div>
+
+      <section class="tako-followup-meetings" id="followup-meetings-section">
+        <h2>Follow-up meeting suggestions</h2>
+        <p class="hint">Real knowledge items that are overdue for review, stuck awaiting a decision, or have no owner.</p>
+        <ul id="followup-meeting-list"><li class="tako-skeleton tako-skeleton-row" aria-hidden="true"></li></ul>
+        <div class="tako-panel" id="followup-meeting-draft-panel" hidden>
+          <h3 id="followup-draft-topic"></h3>
+          <pre id="followup-draft-agenda"></pre>
+          <label>Start time <input type="datetime-local" id="followup-start-time"></label>
+          <label>Duration (minutes) <input type="number" id="followup-duration" value="30"></label>
+          <label>Participant emails (comma-separated) <input type="text" id="followup-participants"></label>
+          <div class="note-err" id="followup-draft-error" hidden></div>
+          <button class="tako-btn tako-btn--primary" data-action="confirm-zoom-meeting">Create Zoom Meeting</button>
+        </div>
+        <div id="followup-meeting-result" hidden></div>
+      </section>
     </section>
 
     <section class="section" data-name="tasks">
@@ -2409,7 +2425,7 @@ function goto(name){
   $$('.tako-nav-item').forEach(t=>t.setAttribute('aria-current',String(t.dataset.name===name)));
   $$('.section').forEach(s=>s.dataset.name===name?s.setAttribute('data-active',''):s.removeAttribute('data-active'));
   if(name==='permissions')loadAccess();
-  if(name==='automations')loadSkills();
+  if(name==='automations'){loadSkills();loadFollowupMeetings();}
   if(name==='tasks')loadMemory();
   if(name==='approvals')loadReview();
   if(name==='connect')loadConnect();
@@ -2640,6 +2656,79 @@ async function loadSkills(force){
     $('#automation-list').innerHTML='<li>'+retryMarkup(e.message,'skills')+'</li>';
   }
 }
+
+/* Follow-up meeting suggestions (real stale/unresolved KnowledgeItems -> a
+   drafted, then human-confirmed, real Zoom meeting). See
+   docs/superpowers/specs/2026-09-22-zoom-followup-meeting-design.md Part 5. */
+let followupItemsLoaded=false;
+async function loadFollowupMeetings(force){
+  if(followupItemsLoaded&&!force)return;followupItemsLoaded=true;
+  $('#followup-meeting-list').innerHTML='<li class="tako-skeleton tako-skeleton-row"></li>';
+  try{
+    const d=await api('/api/knowledge/stale');
+    const items=(d.items||[]);
+    if(!items.length){
+      $('#followup-meeting-list').innerHTML='<li class="hint">Nothing needs a follow-up meeting right now.</li>';
+      return;
+    }
+    $('#followup-meeting-list').innerHTML=items.map(({item,reasons})=>
+      '<li class="tako-automation-card">'
+      +'<p class="tako-automation-sentence">'+esc(item.title)+'</p>'
+      +'<div class="tako-automation-meta"><span><b>Why</b> '+esc((reasons||[]).join(', '))+'</span></div>'
+      +'<button class="tako-btn tako-btn--secondary" data-propose-item="'+esc(item.id)+'">Propose follow-up meeting</button>'
+      +'</li>').join('');
+    $$('#followup-meeting-list [data-propose-item]').forEach(b=>b.addEventListener('click',()=>proposeFollowupMeeting(b.dataset.proposeItem)));
+  }catch(e){
+    $('#followup-meeting-list').innerHTML='<li>'+retryMarkup(e.message,'followup-meetings')+'</li>';
+  }
+}
+let currentFollowupProposal=null;
+async function proposeFollowupMeeting(knowledgeItemId){
+  try{
+    const proposal=await adminApi('/api/automations/zoom-meeting/propose',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({knowledgeItemId,createdBy:'Automations screen'})});
+    currentFollowupProposal=proposal;
+    $('#followup-draft-topic').textContent=proposal.topic;
+    $('#followup-draft-agenda').textContent=proposal.agendaText;
+    $('#followup-start-time').value='';
+    $('#followup-duration').value=String(proposal.proposedDurationMinutes||30);
+    $('#followup-participants').value='';
+    $('#followup-draft-error').hidden=true;
+    $('#followup-meeting-result').hidden=true;
+    $('#followup-meeting-draft-panel').hidden=false;
+  }catch(e){
+    $('#followup-meeting-list').innerHTML='<li>'+retryMarkup(e.message,'followup-meetings')+'</li>';
+  }
+}
+$('[data-action="confirm-zoom-meeting"]')?.addEventListener('click',async()=>{
+  const errBox=$('#followup-draft-error');
+  errBox.hidden=true;
+  if(!currentFollowupProposal){errBox.textContent='No proposal selected.';errBox.hidden=false;return;}
+  const startTimeLocal=$('#followup-start-time').value;
+  if(!startTimeLocal){errBox.textContent='Start time is required.';errBox.hidden=false;return;}
+  const proposedStartAt=new Date(startTimeLocal).toISOString();
+  const proposedDurationMinutes=Number($('#followup-duration').value)||30;
+  const participantEmails=$('#followup-participants').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const btn=$('[data-action="confirm-zoom-meeting"]');
+  btn.disabled=true;
+  const orig=btn.textContent;
+  btn.textContent='Creating…';
+  try{
+    const result=await adminApi('/api/automations/zoom-meeting/confirm',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+      proposalId:currentFollowupProposal.id,proposedStartAt,proposedDurationMinutes,participantEmails,confirmedBy:'Automations screen',
+    })});
+    $('#followup-meeting-draft-panel').hidden=true;
+    $('#followup-meeting-result').hidden=false;
+    $('#followup-meeting-result').innerHTML='<p>Zoom meeting created — <a href="'+esc(result.zoomMeeting.joinUrl)+'" target="_blank" rel="noopener">'+esc(result.zoomMeeting.joinUrl)+'</a></p>';
+    currentFollowupProposal=null;
+    await loadFollowupMeetings(true);
+  }catch(e){
+    errBox.textContent=e.message;
+    errBox.hidden=false;
+  }finally{
+    btn.disabled=false;
+    btn.textContent=orig;
+  }
+});
 
 const CONNECTOR_NODE_LABELS = {
   drive: "Google Drive", notion: "Notion", slack: "Slack",
@@ -3214,6 +3303,7 @@ const RETRY_FNS={
   review:()=>loadReview(true),
   activity:()=>loadActivity(true),
   connect:()=>loadConnect(true),
+  "followup-meetings":()=>loadFollowupMeetings(true),
 };
 document.addEventListener('click',e=>{
   const btn=e.target.closest && e.target.closest('[data-retry]');
