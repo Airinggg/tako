@@ -1990,7 +1990,12 @@ body { font-family: var(--tako-font); font-size: var(--tako-body); color: var(--
     <section class="section" data-name="automations">
       <header class="tako-screen-head">
         <h1>Automations</h1>
-        <div class="tako-view-toggle" role="group" aria-label="View">
+        <!-- Canvas view (lib/connectors/automation-canvas/) is still being
+             built by a separate workstream -- hidden from the UI until it's
+             ready so it can't be reached mid-recording or mid-demo. List
+             stays the only (and default) view; do not remove the canvas
+             code itself, just this entry point. -->
+        <div class="tako-view-toggle" role="group" aria-label="View" hidden>
           <button class="tako-btn tako-btn--secondary" data-view-toggle="list" aria-pressed="true">List</button>
           <button class="tako-btn tako-btn--secondary" data-view-toggle="canvas" aria-pressed="false">Canvas</button>
         </div>
