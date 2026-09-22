@@ -386,3 +386,58 @@ test("every adapter trigger string is one of the builder's real AB_TRIGGER_OPTIO
   }
   assert.equal(Object.values(TRIGGER_NODE_TO_STRING).length, AB_TRIGGER_OPTIONS.length);
 });
+
+// scripts/demo.ts always resolves config/meeting-proposals.json against the
+// real repo root (no env-var override) -- same discipline as
+// withSeededRetryReview() above: seed a temporary fixture, always restore
+// whatever was there before, whether the test passes or throws.
+const PROPOSALS_PATH = join(import.meta.dir, "..", "config", "meeting-proposals.json");
+function withSeededMeetingProposal<T>(status: "draft" | "confirmed" | "created", fn: () => T): T {
+  const existed = existsSync(PROPOSALS_PATH);
+  const original = existed ? readFileSync(PROPOSALS_PATH, "utf8") : null;
+  const fixture = {
+    proposals: [{
+      id: "mtgprop_test_fixture",
+      knowledgeItemId: "ki_test_fixture",
+      reasons: ["ownerless"],
+      topic: "Test fixture follow-up",
+      agendaText: "test agenda",
+      evidence: [{ pageSlug: "shared/notes/x" }],
+      proposedStartAt: status === "draft" ? null : "2026-10-01T09:00:00.000Z",
+      proposedDurationMinutes: 30,
+      participantEmails: [],
+      status,
+      createdAt: "2026-09-23T00:00:00.000Z",
+      createdBy: "test",
+      confirmedAt: status === "draft" ? null : "2026-09-24T00:00:00.000Z",
+      confirmedBy: status === "draft" ? null : "test",
+      zoomMeeting: status === "created" ? { id: "1", joinUrl: "https://zoom.us/j/1", startUrl: "https://zoom.us/s/1" } : null,
+    }],
+  };
+  try {
+    writeFileSync(PROPOSALS_PATH, JSON.stringify(fixture, null, 2));
+    return fn();
+  } finally {
+    if (existed) writeFileSync(PROPOSALS_PATH, original!);
+    else if (existsSync(PROPOSALS_PATH)) unlinkSync(PROPOSALS_PATH);
+  }
+}
+
+test("activityView surfaces a created Zoom meeting proposal as a success entry, and nothing for draft/confirmed", () => {
+  withSeededMeetingProposal("created", () => {
+    const { entries } = activityView();
+    const entry = entries.find((e) => e.id === "mtgprop_test_fixture");
+    assert.ok(entry, "expected a created proposal to produce an activity entry");
+    assert.equal(entry!.label, "Zoom meeting created: Test fixture follow-up");
+    assert.equal(entry!.outcome, "success");
+    assert.equal(entry!.initiator, "test");
+  });
+  withSeededMeetingProposal("confirmed", () => {
+    const { entries } = activityView();
+    assert.equal(entries.find((e) => e.id === "mtgprop_test_fixture"), undefined);
+  });
+  withSeededMeetingProposal("draft", () => {
+    const { entries } = activityView();
+    assert.equal(entries.find((e) => e.id === "mtgprop_test_fixture"), undefined);
+  });
+});

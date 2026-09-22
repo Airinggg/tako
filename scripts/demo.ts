@@ -1027,6 +1027,25 @@ export function activityView(): { entries: ActivityEntry[] } {
     });
   }
 
+  // Source 3: every real Zoom meeting actually created via a follow-up
+  // proposal. A "draft" or "confirmed" (not yet created) proposal
+  // contributes nothing here — an unconfirmed or failed-to-create meeting
+  // never happened, so it must not appear to have.
+  for (const p of loadMeetingProposals(PROPOSAL_STORE_PATH)) {
+    if (p.status !== "created") continue;
+    entries.push({
+      id: p.id,
+      time: p.confirmedAt,
+      label: `Zoom meeting created: ${p.topic}`,
+      initiator: p.confirmedBy ?? "—",
+      sources: p.evidence.map((e) => e.pageSlug),
+      outcome: "success",
+      outcomeLabel: "Success",
+      duration: "—",
+      needsRetry: false,
+    });
+  }
+
   entries.sort((a, b) => new Date(b.time ?? 0).getTime() - new Date(a.time ?? 0).getTime());
   return { entries };
 }
