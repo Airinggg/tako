@@ -1149,6 +1149,8 @@ const ADMIN_ROUTES = new Set([
   "/api/connectors/test",
   "/api/connectors/sync",
   "/api/ask-provider",
+  "/api/automations/zoom-meeting/propose",
+  "/api/automations/zoom-meeting/confirm",
 ]);
 
 if (import.meta.main) {
@@ -1276,6 +1278,37 @@ if (import.meta.main) {
 
         if (url.pathname === "/api/review-decide" && req.method === "POST") {
           return json(reviewDecide(await readJsonBody<Record<string, string>>(req)));
+        }
+
+        if (url.pathname === "/api/knowledge/stale" && req.method === "GET") {
+          const items = loadKnowledgeItems(KNOWLEDGE_STORE_PATH);
+          return json({ items: findStaleOrUnresolvedKnowledgeItems(items, new Date().toISOString()) });
+        }
+        if (url.pathname === "/api/automations/zoom-meeting/proposals" && req.method === "GET") {
+          return json({ proposals: loadMeetingProposals(PROPOSAL_STORE_PATH) });
+        }
+        if (url.pathname === "/api/automations/zoom-meeting/propose" && req.method === "POST") {
+          try {
+            const body = await readJsonBody(req);
+            return json(proposeZoomMeeting({ knowledgeItemId: String(body.knowledgeItemId ?? ""), createdBy: String(body.createdBy ?? "") }));
+          } catch (err) {
+            return safeErrorResponse(err, json);
+          }
+        }
+        if (url.pathname === "/api/automations/zoom-meeting/confirm" && req.method === "POST") {
+          try {
+            const body = await readJsonBody(req);
+            const result = await confirmZoomMeeting({
+              proposalId: String(body.proposalId ?? ""),
+              proposedStartAt: String(body.proposedStartAt ?? ""),
+              proposedDurationMinutes: body.proposedDurationMinutes ? Number(body.proposedDurationMinutes) : undefined,
+              participantEmails: Array.isArray(body.participantEmails) ? body.participantEmails.map(String) : [],
+              confirmedBy: String(body.confirmedBy ?? ""),
+            });
+            return json(result);
+          } catch (err) {
+            return safeErrorResponse(err, json);
+          }
         }
 
         if (url.pathname === "/api/connectors") {
