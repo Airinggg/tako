@@ -26,3 +26,28 @@ test("the provision route derives the personal client name, never accepts an adm
   assert.match(routeBody, /memberId/);
   assert.doesNotMatch(routeBody, /body\.name|body\.clientName/);
 });
+
+test("the provision route awaits/catches serveGbrain instead of firing it unawaited", () => {
+  const src = readFileSync(join(REPO, "scripts/demo.ts"), "utf8");
+  const routeStart = src.indexOf('url.pathname === "/api/permissions/provision"');
+  const routeBody = src.slice(routeStart, routeStart + 2200);
+  // Regression for the bug where `try { serveGbrain([]); } catch {}` could
+  // never catch a rejection because serveGbrain() is async and the call was
+  // never awaited -- any failure became an unhandled promise rejection
+  // instead of a 500 to the admin (spec section 7: "errors must surface
+  // clearly to the admin, not fail silently").
+  //
+  // serveGbrain() only resolves once the spawned daemon process exits, so a
+  // literal `await serveGbrain([])` would hang the whole request on every
+  // successful cold start -- the fix must instead attach a rejection
+  // handler (`.catch`) to observe a real startup failure, and separately
+  // poll findAlethiaServe() -- the daemon's own readiness signal -- until
+  // it is up or a bounded wait is exhausted.
+  assert.match(routeBody, /serveGbrain\(\[\]\)\s*\.catch/);
+  assert.match(routeBody, /findAlethiaServe\(\)/);
+  // A bounded retry loop (not an unbounded/blocking wait) must poll for
+  // readiness, and a still-not-ready outcome must return a clear error
+  // rather than silently falling through to an empty mcpUrl.
+  assert.match(routeBody, /for\s*\([^)]*attempt[^)]*\)/);
+  assert.match(routeBody, /did not start in time|could not start the MCP server/);
+});

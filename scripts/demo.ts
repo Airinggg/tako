@@ -1244,8 +1244,27 @@ if (import.meta.main) {
           if (!member) return json({ error: "member not found" }, 404);
           if (!member.read.length) return json({ error: "this member has no granted access to provision from" }, 400);
           if (!findAlethiaServe()) {
-            try { serveGbrain([]); } catch (err) {
-              return json({ error: `could not start the MCP server: ${(err as Error).message}` }, 500);
+            // serveGbrain() resolves only when the spawned `gbrain serve --http`
+            // process exits, which for a healthy daemon is "never during this
+            // request" -- so we must not await it to completion. Instead, catch
+            // any early rejection (spawn failure, etc.) into a variable and poll
+            // the same readiness signal serve-runtime.ts itself uses
+            // (findAlethiaServe(), backed by its state file) until the daemon
+            // has actually bound its port or the bounded wait is exhausted.
+            // Either way we surface a clear 500 to the admin (spec §7) instead
+            // of silently returning an empty mcpUrl or leaving an unhandled
+            // rejection.
+            const startupError: { current: Error | null } = { current: null };
+            serveGbrain([]).catch((err) => { startupError.current = err as Error; });
+            let started = false;
+            for (let attempt = 0; attempt < 20; attempt++) {
+              if (startupError.current) break;
+              if (findAlethiaServe()) { started = true; break; }
+              await Bun.sleep(150);
+            }
+            if (!started) {
+              const message = startupError.current ? startupError.current.message : "MCP daemon did not start in time";
+              return json({ error: `could not start the MCP server: ${message}` }, 500);
             }
           }
           const personalClientName = `${member.name}-agent`.replace(/[^a-z0-9-]/gi, "-").toLowerCase().slice(0, 64);
