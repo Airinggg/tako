@@ -6,6 +6,7 @@
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { categorizeText, type Department } from "../govern/categorize.ts";
+import { ClientError } from "../util/http-security.ts";
 
 const REPO = join(import.meta.dir, "..", "..");
 const BRAIN_CLI = join(REPO, "packages/brain/src/cli.ts");
@@ -84,6 +85,19 @@ export function usesHostedProvider(): boolean {
  *  the prompt (retrieved document content included) to Google's servers —
  *  callers must not reach this path with real customer data; usesHostedProvider()
  *  gates it behind an explicit opt-in so it can never be silently active. */
+/** Status codes Google documents as transient/overload conditions, worth a
+ *  short retry rather than failing the request outright. */
+const GEMINI_RETRYABLE_STATUS = new Set([429, 503]);
+
+function geminiErrorMessage(status: number, body: string): string {
+  try {
+    const parsed = JSON.parse(body);
+    const message = parsed?.error?.message;
+    if (typeof message === "string" && message) return message;
+  } catch { /* not JSON, fall through to the raw body */ }
+  return body || `HTTP ${status}`;
+}
+
 export async function geminiAnswer(
   prompt: string,
   opts: { model?: string; apiKey?: string; timeoutMs?: number; system?: string } = {},
@@ -91,22 +105,37 @@ export async function geminiAnswer(
   const model = opts.model || process.env.GEMINI_MODEL || "gemini-3.6-flash";
   const apiKey = opts.apiKey || process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY is not set (required when ASK_PROVIDER=gemini)");
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-    {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        ...(opts.system ? { systemInstruction: { parts: [{ text: opts.system }] } } : {}),
-        generationConfig: { temperature: 0 },
-      }),
-      signal: AbortSignal.timeout(opts.timeoutMs ?? 60_000),
-    },
-  );
-  if (!res.ok) throw new Error(`gemini ${res.status}: ${await res.text()}`);
-  const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? "").join("") ?? "";
-  return text.trim();
+
+  const attempts = 3;
+  let lastStatus = 0;
+  let lastMessage = "";
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          ...(opts.system ? { systemInstruction: { parts: [{ text: opts.system }] } } : {}),
+          generationConfig: { temperature: 0 },
+        }),
+        signal: AbortSignal.timeout(opts.timeoutMs ?? 60_000),
+      },
+    );
+    if (res.ok) {
+      const data = await res.json();
+      const text = data.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? "").join("") ?? "";
+      return text.trim();
+    }
+    lastStatus = res.status;
+    lastMessage = geminiErrorMessage(res.status, await res.text());
+    if (!GEMINI_RETRYABLE_STATUS.has(res.status) || attempt === attempts) break;
+    await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+  }
+  // Google's own error message (no internal paths, no secrets) is safe to
+  // show the person driving the demo directly, instead of masking a
+  // transient "the model is overloaded, try again" as an opaque 500.
+  throw new ClientError(`Gemini is unavailable right now (${lastStatus}): ${lastMessage}`, 502);
 }
 
 /** Single entry point answerFromSource uses for synthesis — dispatches to
