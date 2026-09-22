@@ -14,6 +14,7 @@ import { gbrainHome } from "../lib/eval/qa.ts";
 import { grantsForScope, parseSkillFrontmatter, type SkillFrontmatter } from "../lib/scopes/grants.ts";
 import { buildTree, excluded, included, type Scope } from "../lib/scopes/model.ts";
 import { ClientError, readJsonBody, requireAdmin, resolveAdminToken, safeErrorResponse } from "../lib/util/http-security.ts";
+import { invite, revoke } from "../lib/console/provision.ts";
 
 const REPO = join(import.meta.dir, "..");
 const BRAIN_CLI = join(REPO, "packages/brain/src/cli.ts");
@@ -216,25 +217,6 @@ function loadMembers() {
   }));
 }
 
-function invite(name: string, email: string, source: string, federatedRead: string[]) {
-  if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(name)) throw new ClientError("name must be kebab-case, 2-64 chars");
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ClientError("enter a valid email address");
-  const reads = [...new Set([source, ...federatedRead])].filter(Boolean);
-  if (!source || !reads.length) throw new ClientError("the selected scope has no realised source yet");
-  cache.clear();
-  const out = gb(["auth", "register-client", name, "--scopes", "read", "--source", source, "--federated-read", reads.join(",")]);
-  const clientId = out.match(/(gbrain_cl_[a-f0-9]{16,})/)?.[1] ?? "";
-  const secret = out.match(/(secret|client[_-]?secret)[:\s]+([A-Za-z0-9._-]{16,})/i)?.[2]
-    ?? out.match(/\b([A-Za-z0-9._-]{40,})\b/)?.[1] ?? "";
-  return { name, email, source, reads, clientId, secret, raw: out };
-}
-
-function revoke(clientId: string) {
-  if (!/^gbrain_cl_[a-f0-9]+$/.test(clientId)) throw new ClientError("bad client id");
-  cache.clear();
-  return gb(["auth", "revoke-client", clientId]);
-}
-
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 
@@ -269,13 +251,19 @@ if (import.meta.main) {
             if (!requested.length || cards.length !== requested.length || !primary) throw new ClientError("choose at least one configured scope");
             if (cards.some((brain: any) => !brain.shareable)) throw new ClientError("realise every selected scope before inviting a member");
             const reads = [...new Set(cards.flatMap((brain: any) => brain.readSources))] as string[];
-            return json(invite(String(body.name).trim(), String(body.email).trim(), primary.primarySource, reads));
+            const result = invite(String(body.name).trim(), String(body.email).trim(), primary.primarySource, reads);
+            cache.clear();
+            return json(result);
           }
-          return json(invite(String(body.name).trim(), String(body.email).trim(), String(body.source), Array.isArray(body.federatedRead) ? body.federatedRead : []));
+          const result = invite(String(body.name).trim(), String(body.email).trim(), String(body.source), Array.isArray(body.federatedRead) ? body.federatedRead : []);
+          cache.clear();
+          return json(result);
         }
         if (url.pathname === "/api/revoke" && request.method === "POST") {
           const { clientId } = await readJsonBody<{ clientId?: string }>(request);
-          return json({ ok: true, message: revoke(String(clientId)) });
+          const message = revoke(String(clientId));
+          cache.clear();
+          return json({ ok: true, message });
         }
         return new Response("not found", { status: 404 });
       } catch (error) {
