@@ -118,8 +118,9 @@ function overview() {
   };
 
   return {
-    model: MODEL,
-    localOnly: true,
+    model: usesHostedProvider() ? `${process.env.GEMINI_MODEL || "gemini-3.6-flash"} (external — demo mode)` : MODEL,
+    localOnly: !usesHostedProvider(),
+    gbrainHome: gbrainHome(),
     totals: {
       sources: sources.length,
       docs: sources.reduce((n, s) => n + s.docs, 0),
@@ -1126,8 +1127,23 @@ if (import.meta.main) {
           if (!q) return json({ error: "質問を入力してください" }, 400);
           const src = String(source || DEFAULT_SOURCE);
           const dept = DEPARTMENTS.includes(category as Department) ? (category as Department) : undefined;
-          const r = await answerFromSource(q, src, { model: MODEL, topK: 3, department: dept });
+          const r = await answerFromSource(q, src, { model: MODEL, department: dept });
           return json({ answer: r.answer, pages: r.pages, retrieved: r.retrieved, cited: citedSlugs(r.answer), ms: r.ms, source: src, category: dept ?? null });
+        }
+
+        if (url.pathname === "/api/ask-provider" && req.method === "POST") {
+          const { provider } = await readJsonBody<{ provider?: string }>(req);
+          if (provider !== "ollama" && provider !== "gemini") {
+            return json({ error: 'provider must be "ollama" or "gemini"' }, 400);
+          }
+          if (provider === "gemini" && !process.env.GEMINI_API_KEY) {
+            return json({ error: "GEMINI_API_KEY is not set — add it to .env and restart before switching to Gemini" }, 400);
+          }
+          // In-memory only, not persisted to .env — a real server restart
+          // always falls back to .env's own setting, so a demo session can
+          // never accidentally leave hosted-provider mode on permanently.
+          process.env.ASK_PROVIDER = provider;
+          return json({ ok: true, provider, localOnly: !usesHostedProvider() });
         }
 
         if (url.pathname === "/api/page") {
@@ -1221,7 +1237,9 @@ if (import.meta.main) {
 
   console.log(`\n  tako demo  →  http://localhost:${PORT}`);
   console.log(`  model: ${MODEL}   ·   default source: ${DEFAULT_SOURCE}   ·   GBRAIN_HOME=${gbrainHome()}`);
-  console.log(`  local only — retrieval and synthesis both run on Ollama, nothing leaves this machine\n`);
+  console.log(usesHostedProvider()
+    ? `  ⚠ DEMO MODE — synthesis is routed to an external API (Gemini), not local Ollama. Do not use with real customer data.\n`
+    : `  local only — retrieval and synthesis both run on Ollama, nothing leaves this machine\n`);
   // Pre-warm the blocking reads so the stage machine's first paint is instant.
   // The Overview's worked entry stays the hand-verified canned copy — the live
   // 3B model is (correctly) shown only in the Ask tab, where the presenter drives
@@ -1941,10 +1959,17 @@ body { font-family: var(--tako-font); font-size: var(--tako-body); color: var(--
           ${DEPARTMENTS.map((d) => `<button class="tako-filter" type="button" data-category="${d}" aria-pressed="false" style="white-space:nowrap">${DEPARTMENT_LABELS[d]}</button>`).join("")}
         </div>
       </form>
+      <div class="tako-filter-row" id="ask-provider-row" style="margin-top:10px;align-items:center;gap:8px">
+        <span class="hint" style="margin:0">Model:</span>
+        <button class="tako-filter" type="button" data-provider="ollama" aria-pressed="true">Ollama (local)</button>
+        <button class="tako-filter" type="button" data-provider="gemini" aria-pressed="false">Gemini (external, demo-only)</button>
+      </div>
+      <p class="hint" id="ask-hosted-warning" hidden style="color:var(--tako-danger,#b00);font-weight:600">⚠ Demo mode: this question and the retrieved document content are sent to an external API (Gemini), not processed locally.</p>
+      <p class="out" id="ask-provider-out" hidden></p>
       <div id="ask-out"></div>
       <details class="tako-advanced">
         <summary>Details</summary>
-        <p class="hint">Answers only from your connected sources, run on a local model ・ <span id="ask-model">—</span></p>
+        <p class="hint">Answers only from your connected sources ・ <span id="ask-model">—</span></p>
       </details>
     </section>
 
@@ -2095,12 +2120,51 @@ body { font-family: var(--tako-font); font-size: var(--tako-body); color: var(--
 
     <section class="section" data-name="settings">
       <header class="tako-screen-head"><h1>Settings</h1></header>
-      <p class="tako-supporting">Not available in this view yet.</p>
+
+      <h2>Answer model</h2>
+      <div class="cx-summary">
+        <div class="cx-summary-row"><span class="cx-summary-label">Currently answering with</span><span id="settings-model">—</span></div>
+      </div>
+      <p class="hint">Switch between the local model and the demo-mode external model from <b>Ask Tako → Details</b>.</p>
+
+      <h2 style="margin-top:var(--tako-space-4)">Company brain</h2>
+      <div class="cx-summary">
+        <div class="cx-summary-row"><span class="cx-summary-label">Brain location</span><span id="settings-brain-home" class="mono">—</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Connected sources</span><span id="settings-sources">—</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Indexed documents</span><span id="settings-docs">—</span></div>
+      </div>
+      <p class="hint">Manage which apps feed the brain from <b>Connected Apps</b>.</p>
+
+      <h2 style="margin-top:var(--tako-space-4)">About</h2>
+      <p class="tako-supporting">Tako is an on-premise company knowledge register. It federates read-only
+      connections to your team's tools, answers questions using local models only, and never sends or
+      publishes anything without a named person's approval.</p>
     </section>
 
     <section class="section" data-name="help">
       <header class="tako-screen-head"><h1>Help</h1></header>
-      <p class="tako-supporting">Not available in this view yet.</p>
+
+      <h2>Quick tour</h2>
+      <div class="cx-summary">
+        <div class="cx-summary-row"><span class="cx-summary-label">Home</span><span>Today's activity and what needs you</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Ask Tako</span><span>Ask a question, get a cited answer from one connected source</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Automations</span><span>Teach Tako a trigger-and-steps routine</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Connected Apps</span><span>Connect an app and see its own credential guide</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Tasks</span><span>What's open across your connected sources, triaged</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Activity</span><span>Every action, human or automated, in one log</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Approvals</span><span>Every AI-drafted output waits here for a human decision</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Team & Permissions</span><span>Who can read what, scoped per person</span></div>
+      </div>
+
+      <h2 style="margin-top:var(--tako-space-4)">Connecting an app</h2>
+      <p class="tako-supporting">Open <b>Connected Apps</b>, choose a service, and click
+      <b>"Where do I get this token?"</b> on its card — each one opens a step-by-step guide for that
+      specific service, right inside the app.</p>
+
+      <h2 style="margin-top:var(--tako-space-4)">How an answer is checked</h2>
+      <p class="tako-supporting">質問 (Ask) → 検索 (Retrieve, cited) → 下書き (Draft, local model only)
+      → フィルタ (Filter / mask sensitive info) → 人間の承認 (Human approval — required). Tako never
+      skips the last step on its own.</p>
     </section>
 
   </div></main>
@@ -2269,6 +2333,12 @@ async function loadHome(){
   try{
     const o=await api('/api/overview');
     $('#ask-model').textContent=o.model;
+    $('#ask-hosted-warning').hidden=o.localOnly!==false;
+    $$('#ask-provider-row .tako-filter').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.provider===(o.localOnly===false?'gemini':'ollama'))));
+    $('#settings-model').textContent=o.model;
+    $('#settings-brain-home').textContent=o.gbrainHome||'—';
+    $('#settings-sources').textContent=o.totals.sources;
+    $('#settings-docs').textContent=o.totals.docs;
     // ask-source options — populated here since this is the one unconditional load on boot
     $('#ask-src').innerHTML=o.sources.map(s=>'<option value="'+esc(s.id)+'">'+esc(s.name)+' ('+s.docs+')</option>').join('');
 
@@ -2296,12 +2366,24 @@ $$('#ask-category-row .tako-filter').forEach(btn=>btn.addEventListener('click',(
   askCategory=btn.dataset.category||'';
   $$('#ask-category-row .tako-filter').forEach(b=>b.setAttribute('aria-pressed',String(b===btn)));
 }));
+$$('#ask-provider-row .tako-filter').forEach(btn=>btn.addEventListener('click',async()=>{
+  const provider=btn.dataset.provider;
+  const out=$('#ask-provider-out');
+  out.hidden=false;out.className='out';out.textContent='Switching…';
+  try{
+    const r=await adminApi('/api/ask-provider',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({provider})});
+    $$('#ask-provider-row .tako-filter').forEach(b=>b.setAttribute('aria-pressed',String(b===btn)));
+    $('#ask-hosted-warning').hidden=r.localOnly!==false;
+    out.className='out ok';out.textContent='Switched to '+provider+' — takes effect on your next question.';
+    loadHome(true);
+  }catch(e){out.className='out bad';out.textContent=e.message;}
+}));
 $('#ask-form').addEventListener('submit',async e=>{
   e.preventDefault();
   const q=$('#ask-q').value.trim();if(!q)return;
   const src=$('#ask-src').value;
   const btn=$('button.file');btn.disabled=true;
-  $('#ask-out').innerHTML='<div class="working"><span class="ring"></span>Checking your connected apps… the first run loads the model, 30–60s</div>';
+  $('#ask-out').innerHTML='<div class="working"><span class="ring"></span>Checking your connected apps…</div>';
   try{
     const r=await api('/api/ask',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:q,source:src,category:askCategory})});
     $('#ask-out').innerHTML=entryHtml({question:q,...r},{stamp:true});
