@@ -19,6 +19,7 @@ const NOW = new Date().toISOString();
 
 function overdueApproved() {
   const item = newKnowledgeItem({
+    id: "ki_seed_overdue_approved",
     type: "policy",
     title: "[SEED] Vendor security review checklist",
     description: "Required checklist before onboarding any new external vendor with data access.",
@@ -37,6 +38,7 @@ function overdueApproved() {
 
 function stuckUnderReview() {
   const item = newKnowledgeItem({
+    id: "ki_seed_stuck_under_review",
     type: "decision",
     title: "[SEED] Decision: pause the Q3 pricing experiment",
     description: "Candidate decision drafted from a recurring pricing sync — needs reviewer confirmation.",
@@ -54,6 +56,7 @@ function stuckUnderReview() {
 
 function ownerless() {
   return newKnowledgeItem({
+    id: "ki_seed_ownerless",
     type: "procedure",
     title: "[SEED] Incident escalation runbook",
     description: "Steps to escalate a production incident outside business hours — no owner assigned yet.",
