@@ -403,6 +403,7 @@ export function proposeZoomMeeting(
   input: { knowledgeItemId: string; createdBy: string },
   opts: { knowledgeStorePath?: string; proposalStorePath?: string; now?: string } = {},
 ) {
+  if (READ_ONLY) throw new ClientError("この画面は読み取り専用です / this instance is read-only");
   const knowledgeStorePath = opts.knowledgeStorePath ?? KNOWLEDGE_STORE_PATH;
   const proposalStorePath = opts.proposalStorePath ?? PROPOSAL_STORE_PATH;
   const item = getKnowledgeItem(input.knowledgeItemId, knowledgeStorePath);
@@ -420,11 +421,14 @@ export function proposeZoomMeeting(
  *  The proposal is persisted as "confirmed" before the Zoom call, so a
  *  failed call never loses the human's confirmed details; it can be
  *  retried by re-POSTing confirm with the same proposalId once the
- *  underlying problem (e.g. bad credentials) is fixed. */
+ *  underlying problem (e.g. bad credentials) is fixed — confirmMeetingProposal()
+ *  accepts a proposal that is already "confirmed" (not just "draft") for
+ *  exactly this reason. */
 export async function confirmZoomMeeting(
   input: { proposalId: string; proposedStartAt: string; proposedDurationMinutes?: number; participantEmails: string[]; confirmedBy: string },
   opts: { proposalStorePath?: string; now?: string; zoomCredentials?: ZoomCredentials; fetchImpl?: typeof fetch } = {},
 ) {
+  if (READ_ONLY) throw new ClientError("この画面は読み取り専用です / this instance is read-only");
   const proposalStorePath = opts.proposalStorePath ?? PROPOSAL_STORE_PATH;
   const existing = getMeetingProposal(input.proposalId, proposalStorePath);
   if (!existing) throw new ClientError(`meeting proposal "${input.proposalId}" not found`);
@@ -437,13 +441,25 @@ export async function confirmZoomMeeting(
   });
   upsertMeetingProposal(confirmed, proposalStorePath);
 
-  const creds = opts.zoomCredentials ?? resolveZoomCredentials();
-  const zoomMeeting = await createZoomMeeting(creds, {
-    topic: confirmed.topic,
-    agenda: confirmed.agendaText,
-    startTime: confirmed.proposedStartAt!,
-    durationMinutes: confirmed.proposedDurationMinutes,
-  }, { fetchImpl: opts.fetchImpl });
+  let zoomMeeting;
+  try {
+    const creds = opts.zoomCredentials ?? resolveZoomCredentials();
+    zoomMeeting = await createZoomMeeting(creds, {
+      topic: confirmed.topic,
+      agenda: confirmed.agendaText,
+      startTime: confirmed.proposedStartAt!,
+      durationMinutes: confirmed.proposedDurationMinutes,
+      participantEmails: confirmed.participantEmails,
+    }, { fetchImpl: opts.fetchImpl });
+  } catch (err) {
+    if (err instanceof ClientError) throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    const match = message.match(/^zoom (?:oauth|create meeting) (\d+):/);
+    if (match) {
+      throw new ClientError(`Zoom API request failed (status ${match[1]}) — check ZOOM_ACCOUNT_ID/ZOOM_CLIENT_ID/ZOOM_CLIENT_SECRET and try again`);
+    }
+    throw new ClientError(message);
+  }
 
   const created = markMeetingCreated(confirmed, zoomMeeting, opts.now);
   upsertMeetingProposal(created, proposalStorePath);
@@ -1304,7 +1320,13 @@ if (import.meta.main) {
           return json({ items: findStaleOrUnresolvedKnowledgeItems(items, new Date().toISOString()) });
         }
         if (url.pathname === "/api/automations/zoom-meeting/proposals" && req.method === "GET") {
-          return json({ proposals: loadMeetingProposals(PROPOSAL_STORE_PATH) });
+          // Public, non-admin-gated route — never return zoomMeeting.startUrl
+          // here (it lets anyone holding it start the meeting as host). The
+          // admin-gated confirm response is fine to return in full.
+          const proposals = loadMeetingProposals(PROPOSAL_STORE_PATH).map((p) =>
+            p.zoomMeeting ? { ...p, zoomMeeting: { id: p.zoomMeeting.id, joinUrl: p.zoomMeeting.joinUrl } } : p
+          );
+          return json({ proposals });
         }
         if (url.pathname === "/api/automations/zoom-meeting/propose" && req.method === "POST") {
           try {
@@ -1910,6 +1932,7 @@ body { font-family: var(--tako-font); font-size: var(--tako-body); color: var(--
 .tako-automation-templates, .tako-automation-builder { background: var(--tako-surface); border: 1px solid var(--tako-border); border-radius: var(--tako-radius-card); padding: var(--tako-space-4); display: flex; flex-direction: column; gap: var(--tako-space-3); margin-bottom: var(--tako-space-4); }
 .tako-automation-templates[hidden], .tako-automation-builder[hidden] { display: none; }
 .tako-automation-canvas { position: relative; height: 460px; border: 1px solid var(--tako-border); border-radius: var(--tako-radius-card); }
+.tako-followup-draft-inline { border: 1px solid var(--tako-border); border-radius: var(--tako-radius-card); background: var(--tako-surface); padding: var(--tako-space-4); margin-top: var(--tako-space-3); }
 .tako-canvas-root { position: relative; width: 100%; height: 100%; overflow: hidden; }
 .tako-canvas-node { position: absolute; display: flex; align-items: center; justify-content: center; text-align: center; padding: 8px; border: 1px solid var(--tako-border); border-radius: var(--tako-radius-card); background: var(--tako-surface); cursor: grab; font-size: 13px; }
 .tako-canvas-node--approval { background: var(--tako-accent, #2f5f4f); color: #fff; cursor: default; }
@@ -2159,7 +2182,7 @@ body { font-family: var(--tako-font); font-size: var(--tako-body); color: var(--
         <h2>Follow-up meeting suggestions</h2>
         <p class="hint">Real knowledge items that are overdue for review, stuck awaiting a decision, or have no owner.</p>
         <ul id="followup-meeting-list"><li class="tako-skeleton tako-skeleton-row" aria-hidden="true"></li></ul>
-        <div class="tako-panel" id="followup-meeting-draft-panel" hidden>
+        <div class="tako-followup-draft-inline" id="followup-meeting-draft-panel" hidden>
           <h3 id="followup-draft-topic"></h3>
           <pre id="followup-draft-agenda"></pre>
           <label>Start time <input type="datetime-local" id="followup-start-time"></label>
