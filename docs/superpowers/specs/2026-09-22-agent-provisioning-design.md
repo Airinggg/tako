@@ -25,9 +25,9 @@ extraction); this spec closes the one real gap.
   just reachable from their own tool.
 - **Not a new token/scope system.** This wires tako's existing
   Team & Permissions access-group model onto `gbrain`'s existing OAuth
-  2.1 client infrastructure (`gbrain auth create`/`rescope-client`/
-  `revoke-client`) — it does not reimplement token issuance, storage, or
-  the OAuth flow itself.
+  2.1 client infrastructure (`gbrain auth register-client`/
+  `rescope-client`/`revoke-client`) — it does not reimplement token
+  issuance, storage, or the OAuth flow itself.
 - **Not federation beyond a person's existing scope.** A provisioned
   endpoint's `--federated-read` list is computed *from* the member's
   current access group (`Member.read`, `lib/console/data.ts`) — an admin
@@ -39,20 +39,40 @@ extraction); this spec closes the one real gap.
 Two things need to exist for provisioning to mean anything:
 
 1. **A running `gbrain serve --http` daemon** — the actual MCP HTTP
-   server every provisioned client connects to. This does not exist in
-   tako's operational setup today (confirmed: no reference to
-   `serve --http` anywhere in `bin/omnibrain` or the sync daemon). It
-   needs to be started and kept alive the same way `bin/omnibrain`
-   already manages the `alethia serve` process (see `stopAlethiaServe`/
-   `findAlethiaServe` in `bin/omnibrain`) — one long-running process per
-   `GBRAIN_HOME`, not one per provisioned client.
+   server every provisioned client connects to. Correction from the
+   brainstorming draft: this is **not new work** — `lib/cli/serve-runtime.ts`
+   already fully implements this (`serveGbrain()` spawns `gbrain serve
+   --http`, `findAlethiaServe()`/`stopAlethiaServe()` manage its
+   lifecycle via a state file, and `./bin/omnibrain serve` already calls
+   `serveGbrain()`). What's missing is only: (a) the provisioning route
+   calling `findAlethiaServe()` to check it's up before minting a client,
+   starting it via `serveGbrain()` if not; and (b) a real bug —
+   `serve-runtime.ts`'s `GBRAIN_HOME` constant is hardcoded to
+   `~/.aletheia-brain` and does not read `process.env.GBRAIN_HOME`, unlike
+   `lib/eval/qa.ts`'s `gbrainHome()`. Left as-is, the MCP server would
+   serve the wrong brain home whenever `GBRAIN_HOME` is overridden (as it
+   already is via `.env` in this project). This must be fixed as part of
+   this feature (Task 1 in the plan) or every provisioned endpoint will
+   point at an empty or wrong brain.
 2. **A provisioning layer in `scripts/demo.ts`** that, given a member id,
-   reads their current `Member.read` sources, shells out to
-   `gbrain auth create --federated-read <sources> --surface starter
-   --scopes read --token-endpoint-auth-method none` (public PKCE-only
-   client — no secret to leak, matching the "revocable any time, no
-   standing secret to rotate" goal), and returns the resulting client's
-   connection info to the UI exactly once.
+   reads their current `Member.read` sources, and runs the real two-step
+   gbrain sequence (verified directly against a running `gbrain` — the
+   brainstorming draft's single `gbrain auth create` command does not
+   exist):
+   ```bash
+   gbrain auth register-client "<member.name>" \
+     --federated-read <member.read.join(",")> \
+     --scopes read --token-endpoint-auth-method none
+   # stdout includes: "Client ID:  gbrain_cl_<hex>"
+   gbrain auth rescope-client "<that client id>" --surface starter
+   ```
+   `--surface` is not accepted at registration time — it must be set via
+   a second `rescope-client` call. The registration step's stdout is the
+   only place the client id appears; the provisioning layer must parse it
+   from the `Client ID:` line. `--token-endpoint-auth-method none` yields
+   a public, PKCE-only client (`<public client — none issued>` for the
+   secret) — no secret to leak, matching the "revocable any time, no
+   standing secret to rotate" goal.
 
 Tako stores **no new credential state of its own** — `gbrain auth
 clients --json` is the source of truth for what's issued, to whom, and
@@ -68,9 +88,12 @@ New admin-gated route, `POST /api/permissions/provision`, in
 { memberId: string }
   → look up Member by id (lib/console/data.ts:loadMembers)
   → if no member.read sources: 400, "this member has no granted access to provision from"
-  → gbrain auth create --federated-read <member.read.join(",")> --surface starter
+  → findAlethiaServe() (lib/cli/serve-runtime.ts) — if not running, call
+    serveGbrain() to start it before proceeding
+  → gbrain auth register-client "<member.name>" --federated-read <member.read.join(",")>
       --scopes read --token-endpoint-auth-method none
-  → parse the created client's id + connection URL from gbrain's output
+  → parse "Client ID:  gbrain_cl_..." from stdout
+  → gbrain auth rescope-client <that id> --surface starter
   → return { clientId, mcpUrl, cliCommand } — shown ONCE in the UI,
     same "reveal once, never re-displayed" pattern already used for the
     one-time admin token at server startup
@@ -137,33 +160,29 @@ the same weight as the redaction/approval gates elsewhere:
   external tool reach the data directly. The "Issue agent access" button
   and its confirmation copy must not read like just another checkbox.
 
-## 6. Operational concerns
+## 6. Operational concerns — resolved
 
-`gbrain serve --http` needs a lifecycle owner. Two options, deferred to
-the implementation plan to decide against real constraints (not decided
-here):
-
-- Extend `bin/omnibrain`'s existing daemon-management pattern
-  (`findAlethiaServe`/`stopAlethiaServe`) to also manage an MCP-serve
-  process, started once and left running.
-- Start it lazily on first provisioning request and manage its PID the
-  same way `scripts/sync-daemon.ts` manages its own lock file
-  (`config/.sync-daemon.lock`).
-
-Either way: if no MCP server is running, the "Issue agent access" flow
-must fail clearly ("no MCP server running — start it with `omnibrain
-serve` first") rather than mint a client credential that points at
-nothing.
+**Resolved (was open in the first draft): reuse the existing daemon
+pattern, do not build a lazy lock-file alternative.**
+`lib/cli/serve-runtime.ts` already owns this lifecycle end to end
+(`serveGbrain()`, `findAlethiaServe()`, `stopAlethiaServe()`, a state
+file keyed by repo root) and `./bin/omnibrain serve` already exposes it.
+The provisioning route calls `findAlethiaServe()`; if it returns `null`,
+the route calls `serveGbrain([])` itself before proceeding, rather than
+failing and telling the admin to run a separate command — provisioning
+should "just work" the first time an admin uses it. The
+`GBRAIN_HOME`-hardcoding bug noted in §2 must be fixed first, or the
+started server points at the wrong brain home.
 
 ## 7. Error handling
 
-- `gbrain auth create` failing (e.g. no brain configured) returns the
-  real error text to the admin, not a generic failure — this is an
-  admin-only, low-frequency action where a clear error matters more than
-  a friendly one.
+- `gbrain auth register-client`/`rescope-client` failing (e.g. no brain
+  configured) returns the real error text to the admin, not a generic
+  failure — this is an admin-only, low-frequency action where a clear
+  error matters more than a friendly one.
 - A member with an empty `Member.read` list is rejected before ever
-  calling `gbrain auth create` (400, clear message) rather than minting
-  a scopeless/useless client.
+  calling `gbrain auth register-client` (400, clear message) rather than
+  minting a scopeless/useless client.
 - Revoking a `clientId` that no longer exists (already revoked, e.g. in
   a race between two admin tabs) is treated as success, not an error —
   the end state (client does not exist) is what the caller wanted.
@@ -173,7 +192,8 @@ nothing.
 - The route handlers' input validation (empty `Member.read`, missing
   `memberId`) is unit-testable without a real `gbrain` call, following
   the existing pattern in `tests/console-scopes.test.ts`.
-- The `gbrain auth create`/`revoke-client` shell-outs themselves are
+- The `gbrain auth register-client`/`rescope-client`/`revoke-client`
+  shell-outs themselves are
   integration-tested against a real local gbrain instance in CI/manual
   verification only (same precedent as `tests/connectors-all.test.ts`'s
   real-sync tests) — not mocked, since the whole point is confirming the
