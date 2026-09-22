@@ -1248,18 +1248,28 @@ if (import.meta.main) {
             // process exits, which for a healthy daemon is "never during this
             // request" -- so we must not await it to completion. Instead, catch
             // any early rejection (spawn failure, etc.) into a variable and poll
-            // the same readiness signal serve-runtime.ts itself uses
-            // (findAlethiaServe(), backed by its state file) until the daemon
-            // has actually bound its port or the bounded wait is exhausted.
-            // Either way we surface a clear 500 to the admin (spec §7) instead
-            // of silently returning an empty mcpUrl or leaving an unhandled
-            // rejection.
+            // for readiness until the daemon has actually bound its port or the
+            // bounded wait is exhausted. Either way we surface a clear 500 to
+            // the admin (spec §7) instead of silently returning an empty
+            // mcpUrl or leaving an unhandled rejection.
             const startupError: { current: Error | null } = { current: null };
             serveGbrain([]).catch((err) => { startupError.current = err as Error; });
             let started = false;
             for (let attempt = 0; attempt < 20; attempt++) {
               if (startupError.current) break;
-              if (findAlethiaServe()) { started = true; break; }
+              // findAlethiaServe()'s state file is written before the spawned
+              // process has bound its port, so it alone is not "ready" --
+              // probe the port too. Any response (including a 4xx) proves
+              // something is actually listening; a connection failure means
+              // it isn't up yet.
+              const serving = findAlethiaServe();
+              if (serving) {
+                try {
+                  await fetch(`http://localhost:${serving.port}/mcp`, { signal: AbortSignal.timeout(500) });
+                  started = true;
+                  break;
+                } catch { /* not listening yet */ }
+              }
               await Bun.sleep(150);
             }
             if (!started) {
@@ -1268,9 +1278,17 @@ if (import.meta.main) {
             }
           }
           const personalClientName = `${member.name}-agent`.replace(/[^a-z0-9-]/gi, "-").toLowerCase().slice(0, 64);
-          const result = invite(personalClientName, `${member.name}@agent.local`, member.write, member.read);
+          // The federated-read ceiling must be exactly member.read -- never
+          // wider. invite()'s `source` parameter also gets folded into the
+          // federated-read set by design (for scripts/console.ts's own
+          // admin-picks-both-explicitly flow), so passing member.write here
+          // would silently widen this agent's grant beyond what the member
+          // can see in tako itself. Using one of the member's own already-
+          // granted read sources keeps `source` valid (it must reference a
+          // real, existing source) without adding anything new to the grant.
+          const result = invite(personalClientName, `${member.name}@agent.local`, member.read[0], member.read);
           const serving = findAlethiaServe();
-          const mcpUrl = serving ? `http://localhost:${serving.port}` : "";
+          const mcpUrl = serving ? `http://localhost:${serving.port}/mcp` : "";
           return json({
             clientId: result.clientId,
             mcpUrl,

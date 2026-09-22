@@ -30,7 +30,7 @@ test("the provision route derives the personal client name, never accepts an adm
 test("the provision route awaits/catches serveGbrain instead of firing it unawaited", () => {
   const src = readFileSync(join(REPO, "scripts/demo.ts"), "utf8");
   const routeStart = src.indexOf('url.pathname === "/api/permissions/provision"');
-  const routeBody = src.slice(routeStart, routeStart + 2200);
+  const routeBody = src.slice(routeStart, routeStart + 3000);
   // Regression for the bug where `try { serveGbrain([]); } catch {}` could
   // never catch a rejection because serveGbrain() is async and the call was
   // never awaited -- any failure became an unhandled promise rejection
@@ -50,4 +50,18 @@ test("the provision route awaits/catches serveGbrain instead of firing it unawai
   // rather than silently falling through to an empty mcpUrl.
   assert.match(routeBody, /for\s*\([^)]*attempt[^)]*\)/);
   assert.match(routeBody, /did not start in time|could not start the MCP server/);
+});
+
+test("the provision route never widens the federated-read grant past member.read", () => {
+  const src = readFileSync(join(REPO, "scripts/demo.ts"), "utf8");
+  const routeStart = src.indexOf('url.pathname === "/api/permissions/provision"');
+  const routeBody = src.slice(routeStart, routeStart + 4000);
+  // invite()'s `source` argument is folded into its returned federated-read
+  // set (by design, for scripts/console.ts's own admin-picks-both flow).
+  // Passing member.write here would silently grant the agent read access
+  // to a source the member's own Member.read ceiling doesn't include --
+  // this asserts the route passes a member.read entry as `source` instead,
+  // never member.write.
+  assert.doesNotMatch(routeBody, /invite\([^)]*member\.write/);
+  assert.match(routeBody, /invite\(personalClientName,[^)]*member\.read\[0\][^)]*member\.read\)/);
 });
