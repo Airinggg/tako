@@ -254,9 +254,10 @@ export async function confirmZoomMeeting(
 // resolveZoomCredentials()) and calls createZoomMeeting(creds, {...},
 // { fetchImpl: opts?.fetchImpl }); on success calls markMeetingCreated(),
 // persists "created", and returns the proposal with zoomMeeting populated;
-// on failure, re-throws the client's error as-is (proposal stays
-// "confirmed" in the store — the caller, i.e. the HTTP route below, is
-// responsible for not writing an ActivityEntry on this path).
+// on failure, re-throws the client's error as-is, leaving the proposal
+// persisted as "confirmed" (not "created") in the store. Activity-log
+// visibility is not this function's concern — see the activityView()
+// correction below: a "confirmed" proposal simply produces no entry.
 ```
 
 Both functions accept path/credential/fetch overrides specifically so tests
@@ -281,19 +282,38 @@ anything around them), each a thin wrapper calling the functions above:
   through the existing error-response convention unchanged.
 - `POST /api/automations/zoom-meeting/confirm` — **added to
   `ADMIN_ROUTES`**. Body: `{ proposalId, proposedStartAt,
-  proposedDurationMinutes, participantEmails, confirmedBy }`. Calls
-  `await confirmZoomMeeting(input)`. On success (the returned proposal has
-  `status: "created"`), the route itself appends a real `ActivityEntry`
-  (`label: "Zoom meeting created: <topic>"`, reusing the existing
-  `ActivityEntry` shape at `scripts/demo.ts:861`) — this is the route's own
-  responsibility, not `confirmZoomMeeting`'s, so a caller of the function in
-  a test never has to also fake an activity-log write to verify success. On
-  a thrown error from `confirmZoomMeeting` (Zoom API failure, missing
-  credentials, invalid input), the route returns it via the existing
-  `ClientError`/error-response convention and writes **no** `ActivityEntry`
-  — a failed attempt must never look like a successful one in the activity
-  log. The proposal itself was already persisted as `"confirmed"` before
-  the Zoom call, so it is not lost or duplicated on retry.
+  proposedDurationMinutes, participantEmails, confirmedBy }`. Thin wrapper
+  calling `await confirmZoomMeeting(input)` and returning its result (or
+  propagating its thrown error through the existing `ClientError`/
+  error-response convention). No separate "log a success" step exists here
+  — see the correction below.
+
+**Correction verified against the real code (`scripts/demo.ts:918-966`):**
+this repo has no appendable activity log. `activityView()` is a pure
+function that recomputes `ActivityEntry[]` on every call, from two live
+sources today: the module-level `skillRun` example, and `reviewsView().rows`
+(every real review, mapped to an entry). There is no `appendActivity()`
+function anywhere to call. This feature must follow the exact same pattern,
+not invent a new one:
+
+- `activityView()` gains a third source, added the same way Source 2 is
+  built (`scripts/demo.ts:943-962`): iterate
+  `loadMeetingProposals(DEFAULT_PROPOSAL_STORE_PATH)`, and for every
+  proposal with `status: "created"`, push an `ActivityEntry` with
+  `label: "Zoom meeting created: <topic>"`, `time: proposal.confirmedAt`,
+  `initiator: proposal.confirmedBy`, `outcome: "success"`, and no `retry`
+  (a created meeting has nothing to retry). A `"draft"` or `"confirmed"`
+  (not yet successfully created) proposal contributes no entry — a
+  not-yet-created meeting was never announced as an event, and a
+  Zoom-API-failed confirm attempt (proposal stays `"confirmed"`, per the
+  route bullet above) correctly stays invisible in Activity rather than
+  ever appearing to have "happened."
+- This means "no `ActivityEntry` on failure" (stated in the original design
+  discussion) falls out for free from `activityView()`'s existing
+  derive-from-real-state design — there is no separate write to skip on the
+  failure path, because there was never a write to make on the success
+  path either. Whoever implements this must not add a new persisted
+  activity log; extend `activityView()` in place, exactly like Source 2.
 - `GET /api/automations/zoom-meeting/proposals` — unauthenticated, same
   reasoning as `/api/knowledge/stale`. Returns all proposals (for the UI to
   show status/history).
@@ -345,9 +365,10 @@ confused with real customer data.
   each check `res.ok` and throw with the status and response body — no
   swallowed errors, no partial success reported as success.
 - No participant email, credential, or Zoom response body is written to
-  any log; the `ActivityEntry` created on success records only the topic,
-  timestamp, and outcome, matching the shape existing `ActivityEntry`s
-  already use.
+  any log; the derived `ActivityEntry` for a created meeting (see §5's
+  `activityView()` correction) surfaces only the topic, timestamp, and
+  `confirmedBy`, matching the fields existing `ActivityEntry`s already show
+  for other sources.
 
 ## 8. Testing
 
@@ -377,11 +398,20 @@ confused with real customer data.
   fake Zoom response's `id`/`joinUrl`/`startUrl`, (c) a fake `fetchImpl`
   that returns a non-2xx response leaves the persisted proposal
   `"confirmed"` (verified by re-loading the store), and the thrown error is
-  the one `confirmZoomMeeting` propagates. The `ActivityEntry`-on-success
-  behavior described in §5 lives in the HTTP route wrapper itself, not in
-  `confirmZoomMeeting` — if this repo's convention has no precedent for
-  testing that thin route-wrapper layer in isolation, note that as a gap in
-  the implementation report rather than skip verifying it silently.
+  the one `confirmZoomMeeting` propagates.
+- `activityView()`'s new third source (§5): like `config/reviews.json`
+  today, `activityView()` resolves `config/meeting-proposals.json` against
+  the real repo root with no path override (matching the existing,
+  no-override convention `tests/tako-ui.test.ts` documents for
+  `config/reviews.json`) — so this must be tested the same way that file
+  already tests Source 2: `tests/tako-ui.test.ts`'s existing
+  `withSeededRetryReview()` helper temporarily overwrites the real
+  `config/reviews.json` with fixture content and always restores whatever
+  was there before, whether the test passes or throws. Add an analogous
+  `withSeededMeetingProposal()` helper for `config/meeting-proposals.json`,
+  following that exact save/restore discipline, and prove a `"created"`
+  proposal produces exactly one `ActivityEntry` with `outcome: "success"`,
+  while a `"confirmed"` or `"draft"` proposal produces none.
 
 ## 9. Decision record
 
