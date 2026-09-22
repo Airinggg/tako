@@ -69,6 +69,9 @@ cowork/handoff/codex-*last*.txt
 /config/knowledge-items.json
 /config/knowledge-items.json.*.tmp
 /config/knowledge-items.json.corrupt-*.bak
+/config/meeting-proposals.json
+/config/meeting-proposals.json.*.tmp
+/config/meeting-proposals.json.corrupt-*.bak
 /backups/
 /config/.sync-daemon.lock
 
