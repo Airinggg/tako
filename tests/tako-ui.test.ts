@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { NAV_GROUPS, activityView, renderActivityList, renderPage } from "../scripts/demo.ts";
+import { tmpdir } from "node:os";
+import { NAV_GROUPS, activityView, renderActivityList, renderPage, readSkillFiles, AB_TRIGGER_OPTIONS } from "../scripts/demo.ts";
 import { TAKO_COLORS, TAKO_CSS_TOKENS } from "../scripts/tako/tokens.ts";
+import { TRIGGER_NODE_TO_STRING } from "../lib/connectors/automation-canvas/adapter.ts";
 
 // scripts/demo.ts always resolves config/reviews.json against the real repo
 // root -- there's no env-var override for this path (unlike, e.g.,
@@ -332,4 +334,55 @@ test("Team & Permissions and Connected Apps use the shared skeleton pattern, not
     const section = html.split(`<section class="section" data-name="${name}">`)[1]?.split("</section>")[0] || "";
     assert.doesNotMatch(section, /Loading…/);
   }
+});
+
+// Fixture helper: creates a temporary skill directory with proper structure
+function createSkillFixture(tempRoot: string, skillName: string, procedureSteps: string[]): void {
+  const skillDir = join(tempRoot, "test-source", "skills", skillName);
+  
+  mkdirSync(skillDir, { recursive: true });
+  
+  const procedureText = procedureSteps.map((step, i) => `${i + 1}. ${step}`).join("\n");
+  const skillMarkdown = `---
+name: ${skillName}
+version: 0.0.1
+status: draft
+description: Test skill
+triggers:
+  - test trigger
+reads:
+  - shared
+---
+
+# ${skillName}
+
+## Procedure
+
+${procedureText}
+`;
+  
+  writeFileSync(join(skillDir, "SKILL.md"), skillMarkdown);
+}
+
+test("readSkillFiles exposes verbatim procedure step text, not just a count", () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), "tako-skill-test-"));
+  try {
+    const skillName = "test-skill";
+    createSkillFixture(tempRoot, skillName, ["Summarize the content", "Post to Slack"]);
+    const skills = readSkillFiles(tempRoot);
+    const skill = skills.find((s) => s.name === skillName);
+    assert.ok(skill);
+    assert.deepEqual(skill!.procedureSteps, ["Summarize the content", "Post to Slack"]);
+    assert.equal(skill!.steps, 2); // existing count field must still agree
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+
+test("every adapter trigger string is one of the builder's real AB_TRIGGER_OPTIONS", () => {
+  for (const str of Object.values(TRIGGER_NODE_TO_STRING)) {
+    assert.ok(AB_TRIGGER_OPTIONS.includes(str), `"${str}" is not in AB_TRIGGER_OPTIONS`);
+  }
+  assert.equal(Object.values(TRIGGER_NODE_TO_STRING).length, AB_TRIGGER_OPTIONS.length);
 });

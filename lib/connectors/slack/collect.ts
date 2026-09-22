@@ -48,7 +48,18 @@ async function resolveChannels(request: SlackRequest, wanted: string[]): Promise
   const resolved: { id: string; name: string }[] = [];
 
   if (byName.length) {
-    const channels = await paginate(request, "conversations.list", { types: "public_channel,private_channel", exclude_archived: true }, "channels");
+    // Requesting private_channel alongside public_channel needs the bot's
+    // groups:read scope even when every wanted channel is public — fall back
+    // to public-only rather than fail the whole run over a scope the config
+    // may not need yet, and say so once instead of erroring silently later.
+    let channels: any[];
+    try {
+      channels = await paginate(request, "conversations.list", { types: "public_channel,private_channel", exclude_archived: true }, "channels");
+    } catch (err) {
+      if (!(err instanceof Error) || !err.message.includes("missing_scope")) throw err;
+      console.warn("slack: missing groups:read scope — falling back to public channels only. Private channels will not resolve by name until the bot has groups:read.");
+      channels = await paginate(request, "conversations.list", { types: "public_channel", exclude_archived: true }, "channels");
+    }
     for (const name of byName) {
       const hit = channels.find((c: any) => c.name?.toLowerCase() === name.toLowerCase());
       if (hit) resolved.push({ id: hit.id, name: hit.name });

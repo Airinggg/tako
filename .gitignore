@@ -66,8 +66,14 @@ cowork/handoff/codex-*last*.txt
 /config/sync-state.json.*.tmp
 /config/sync-log.jsonl
 /config/retention.json
+/config/knowledge-items.json
+/config/knowledge-items.json.*.tmp
+/config/knowledge-items.json.corrupt-*.bak
 /backups/
 /config/.sync-daemon.lock
 
 # auto-extracted skill drafts (content-derived, review locally)
 /skill-drafts/
+
+# local git worktrees for isolated plan execution
+/.worktrees/

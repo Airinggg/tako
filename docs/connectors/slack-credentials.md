@@ -9,7 +9,13 @@ Create a Slack app in your company's workspace and use its **Bot User OAuth Toke
 3. Only if you need private channels, also add `groups:read` and `groups:history`. Do not grant `chat:write`, `files:read`, admin scopes, or DM scopes for this connector. Tako's configured channel list does not collect DMs or file contents.
 4. Near the top of **OAuth & Permissions**, select **Install to Workspace** (or **Reinstall to Workspace** after changing scopes), review the permission request, and select **Allow**. If installation is blocked, ask a workspace administrator to approve it; do not use a personal user token as a workaround.
 5. Return to **OAuth & Permissions** and copy the **Bot User OAuth Token**, not the User OAuth Token or app-level token.
-6. In each selected Slack channel, invite the app/bot as a member. For a private channel, an existing member must invite it. A history scope does not bypass channel membership.
+6. In **each** selected Slack channel, invite the bot as a member — being able to *list* a channel is not the same as being able to *read* it, and Tako's connector will fail with `not_in_channel` for any channel the bot can see but hasn't joined. Open the channel and type:
+
+   ```
+   /invite @your-bot-name
+   ```
+
+   replacing `your-bot-name` with the name you gave the app in step 1 (e.g. `/invite @tako`). For a private channel, an existing member of that channel must run this — the bot cannot join a private channel on its own even with the right scope.
 
 Put the bot token in the `SLACK_BOT_TOKEN` environment variable on the machine running Tako. Replace the placeholder with your own token:
 

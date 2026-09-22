@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { mineSkills } from "../lib/skills/extract.ts";
 import { renderDraft } from "../lib/skills/render-draft.ts";
+import { join } from "node:path";
 
 const corpus = [
   { path: "slack/eng/1.md", text: "when a spec question comes up we check the notion page, update it, then post in #eng" },
@@ -66,3 +67,4 @@ test("renderDraft produces a review-gated SKILL.md", () => {
   assert.match(markdown, /DRAFT — human review required/);
   assert.match(markdown, /1\. check Notion\n2\. post in #eng/);
 });
+

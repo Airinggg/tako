@@ -27,7 +27,7 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { TAKO_CSS_TOKENS } from "./tako/tokens.ts";
 import { mascotScene, mascotMark } from "./tako/mascot.ts";
-import { answerFromSource, citedSlugs, gb, gbrainHome } from "../lib/eval/qa.ts";
+import { answerFromSource, citedSlugs, gb, gbrainHome, usesHostedProvider } from "../lib/eval/qa.ts";
 import { loadDashboard, loadMembers } from "../lib/console/data.ts";
 import { connectorRunner, isConnectorName } from "../lib/connectors/registry.ts";
 import { parseSkill } from "../lib/skills/parse.ts";
@@ -38,11 +38,13 @@ import { DEFAULT_POLICY, rollupLine, triage, type DecayPolicy, type Task } from 
 import { CHECK_KEYS, CHECK_LABELS, allowedVerdicts, canApprove, latestDecision, newReview, overallRisk, receiptLine, recordDecision, setCheck, VERDICTS, type ReviewItem, type Verdict } from "../lib/review/model.ts";
 import { resolveSecret } from "../lib/connectors/shared/config.ts";
 import { DEFAULT_RULES, redact, resolveRules, summariseHits, type RedactionRule } from "../lib/govern/redact.ts";
+import { categorizeText, DEPARTMENT_LABELS, DEPARTMENTS, type Department } from "../lib/govern/categorize.ts";
 import { diffGitStatus, formatSyncLogLines, hashContent, parseGitStatus, type SyncLogEntry } from "../lib/govern/sync-log.ts";
 import { checkRateLimit, ClientError, clientKey, readJsonBody, requireAdmin, resolveAdminToken, safeErrorResponse } from "../lib/util/http-security.ts";
 import { writePrivateFileAtomic } from "../lib/util/private-file.ts";
+import { TRIGGER_NODE_TO_STRING } from "../lib/connectors/automation-canvas/adapter.ts";
 
-const REPO = join(import.meta.dir, "..");
+const REPO = import.meta.dir ? join(import.meta.dir, "..") : process.cwd();
 
 const PORT = Number(process.env.PORT) || 4400;
 const MODEL = process.env.ASK_MODEL || "qwen2.5:3b-instruct";
@@ -117,8 +119,9 @@ function overview() {
   };
 
   return {
-    model: MODEL,
-    localOnly: true,
+    model: usesHostedProvider() ? `${process.env.GEMINI_MODEL || "gemini-3.6-flash"} (external — demo mode)` : MODEL,
+    localOnly: !usesHostedProvider(),
+    gbrainHome: gbrainHome(),
     totals: {
       sources: sources.length,
       docs: sources.reduce((n, s) => n + s.docs, 0),
@@ -136,15 +139,15 @@ function overview() {
 // "skills declare the data access they assume, reviewed once.")
 type SkillView = {
   name: string; description: string; triggers: string[];
-  reads: string[]; steps: number; grantedBy: string[];
+  reads: string[]; steps: number; procedureSteps: string[]; grantedBy: string[];
   // Automations-screen fields (Task 6) — each derived from data already read
   // above, never fabricated. See skillsView() for how each is computed.
   trigger: string; actionSummary: string; connectedApps: string[];
   status: string; lastRun: string | null; owner: string; approvalRequired: string;
 };
 
-function readSkillFiles(): Omit<SkillView, "grantedBy" | "trigger" | "actionSummary" | "connectedApps" | "status" | "lastRun" | "owner" | "approvalRequired">[] {
-  const root = join(REPO, "brain-sources");
+export function readSkillFiles(rootOverride?: string): Omit<SkillView, "grantedBy" | "trigger" | "actionSummary" | "connectedApps" | "status" | "lastRun" | "owner" | "approvalRequired">[] {
+  const root = rootOverride || join(REPO, "brain-sources");
   if (!existsSync(root)) return [];
   const out: Omit<SkillView, "grantedBy" | "trigger" | "actionSummary" | "connectedApps" | "status" | "lastRun" | "owner" | "approvalRequired">[] = [];
   for (const src of readdirSync(root, { withFileTypes: true })) {
@@ -163,7 +166,9 @@ function readSkillFiles(): Omit<SkillView, "grantedBy" | "trigger" | "actionSumm
       };
       const proc = md.match(/##\s*Procedure\s*\n([\s\S]*?)(?:\n##\s|\n*$)/i)?.[1] ?? "";
       const steps = (proc.match(/^\s*\d+\.\s+/gm) ?? []).length;
-      out.push({ name: val("name") || d.name, description: val("description"), triggers: list("triggers"), reads: list("reads"), steps });
+      const procedureSteps = (proc.match(/^\s*\d+\.\s+.+$/gm) ?? [])
+        .map((line) => line.replace(/^\s*\d+\.\s+/, "").trim());
+      out.push({ name: val("name") || d.name, description: val("description"), triggers: list("triggers"), reads: list("reads"), steps, procedureSteps });
     }
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));
@@ -238,8 +243,8 @@ function generateAutomationSlug(action1: string, action2: string): string {
 // server-side so createAutomation can reject anything that isn't one of
 // these (the client script below interpolates the same arrays rather than
 // hardcoding its own copy, so the two can never drift apart).
-const AB_TRIGGER_OPTIONS = ["New file added to Drive", "New page added to Notion", "New message in Slack", "Every Monday morning", "Manual"];
-const AB_ACTION_OPTIONS = ["Summarize the content", "Draft a notification", "Run the decision audit", "Post to Slack", "Notify the team channel", "Send an email digest"];
+export const AB_TRIGGER_OPTIONS = ["New file added to Drive", "New page added to Notion", "New message in Slack", "Every Monday morning", "Manual"];
+export const AB_ACTION_OPTIONS = ["Summarize the content", "Draft a notification", "Run the decision audit", "Post to Slack", "Notify the team channel", "Send an email digest"];
 
 /** Create a real automation by writing a new SKILL.md — completing the
  * Task 6 builder, which could pick a trigger/action pair but never had a way
@@ -391,12 +396,17 @@ type ConnectorSpec = {
   /** when set, the `system` field keys an entry inside cfg[name][nested] rather
    *  than the connector being one flat block (used by the CAD connector). */
   nested?: string;
+  /** filename under docs/connectors/ with step-by-step token-acquisition
+   *  instructions for this connector — served read-only via the whitelisted
+   *  /docs/connectors/:file route below (see CREDENTIALS_DOCS). */
+  credentialsDoc?: string;
 };
 
 const CONNECTOR_SPECS: Record<string, ConnectorSpec> = {
   notion: {
     label: "Notion", category: "ドキュメント / Docs", hasToken: true, tokenLabel: "内部インテグレーションのトークン", tokenPh: "ntn_…",
     help: "Notion で内部インテグレーションを作成し、対象のデータベースに接続を共有します。",
+    credentialsDoc: "notion-credentials.md",
     fields: [
       { key: "databases", label: "データベースID", list: true, ph: "3ca943af75c88019a64bee683cb33662" },
       { key: "subdir", label: "取り込み先スコープ", def: "shared" },
@@ -406,6 +416,7 @@ const CONNECTOR_SPECS: Record<string, ConnectorSpec> = {
   slack: {
     label: "Slack", category: "チャット / Chat", hasToken: true, tokenLabel: "ボットトークン", tokenPh: "xoxb-…",
     help: "channels:history / channels:read / users:read 権限のボットを、読みたいチャンネルに招待します。",
+    credentialsDoc: "slack-credentials.md",
     fields: [
       { key: "channels", label: "チャンネル（IDまたは名前）", list: true, ph: "all-hestia" },
       { key: "subdir", label: "取り込み先スコープ", def: "engineering" },
@@ -416,6 +427,7 @@ const CONNECTOR_SPECS: Record<string, ConnectorSpec> = {
   drive: {
     label: "Google Drive", category: "ファイル / Files", hasToken: true, tokenLabel: "アクセストークン", tokenPh: "ya29.…",
     help: "drive.readonly スコープのトークン。フォルダ直下のファイルのみ取り込みます（サブフォルダは各IDを追加）。",
+    credentialsDoc: "drive-credentials.md",
     fields: [
       { key: "folderIds", label: "フォルダID", list: true, ph: "1ueXJLTio4EE9lhXS9uzifnsIPMAuLHQ_" },
       { key: "subdir", label: "取り込み先スコープ", def: "shared" },
@@ -425,6 +437,7 @@ const CONNECTOR_SPECS: Record<string, ConnectorSpec> = {
   discord: {
     label: "Discord", category: "チャット / Chat", hasToken: true, tokenLabel: "ボットトークン", tokenPh: "MTU0…",
     help: "ボットを対象サーバーに参加させ、Message Content Intent を有効にします。",
+    credentialsDoc: "discord-credentials.md",
     fields: [
       { key: "guildId", label: "サーバーID", ph: "1542488991729852516" },
       { key: "channels", label: "チャンネルID", list: true, ph: "1542488992279167090" },
@@ -488,6 +501,7 @@ function connectorsView() {
     const src = sourceRowsList.find((s) => s.source_id === c.subdir);
     return {
       name, label: spec.label, help: spec.help, category: spec.category,
+      credentialsDocUrl: spec.credentialsDoc ? `/docs/connectors/${spec.credentialsDoc}` : "",
       hasToken: spec.hasToken, tokenLabel: spec.tokenLabel, tokenPh: spec.tokenPh,
       tokenMasked: spec.hasToken ? maskToken(c.token) : "",
       configured,
@@ -1068,6 +1082,7 @@ const ADMIN_ROUTES = new Set([
   "/api/connectors/save",
   "/api/connectors/test",
   "/api/connectors/sync",
+  "/api/ask-provider",
 ]);
 
 if (import.meta.main) {
@@ -1086,6 +1101,25 @@ if (import.meta.main) {
 
         if (url.pathname === "/") return new Response(PAGE, { headers: { "content-type": "text/html; charset=utf-8" } });
 
+        // Whitelisted, read-only credential guides. The path segment is
+        // matched against the exact filenames CONNECTOR_SPECS references —
+        // never resolved from the URL itself — so this cannot be used for
+        // directory traversal or to serve arbitrary repo files.
+        if (url.pathname === "/vendor/node-canvas.js") {
+          const file = Bun.file(new URL("../scripts/vendor/node-canvas.js", import.meta.url));
+          return new Response(file, { headers: { "content-type": "text/javascript; charset=utf-8" } });
+        }
+
+        if (url.pathname.startsWith("/docs/connectors/")) {
+          const requested = url.pathname.slice("/docs/connectors/".length);
+          const known = new Set(Object.values(CONNECTOR_SPECS).map((s) => s.credentialsDoc).filter(Boolean));
+          if (known.has(requested)) {
+            const file = Bun.file(new URL(`../docs/connectors/${requested}`, import.meta.url));
+            return new Response(file, { headers: { "content-type": "text/markdown; charset=utf-8" } });
+          }
+          return new Response("Not found", { status: 404 });
+        }
+
         if (url.pathname === "/api/overview") {
           return json({ ...overviewCached(), worked: workedEntry });
         }
@@ -1094,12 +1128,28 @@ if (import.meta.main) {
           if (!checkRateLimit(`ask:${clientKey(req, server)}`, 10, 60_000)) {
             return json({ error: "too many requests, try again shortly" }, 429);
           }
-          const { question, source } = await readJsonBody<{ question?: string; source?: string }>(req);
+          const { question, source, category } = await readJsonBody<{ question?: string; source?: string; category?: string }>(req);
           const q = String(question ?? "").trim();
           if (!q) return json({ error: "質問を入力してください" }, 400);
           const src = String(source || DEFAULT_SOURCE);
-          const r = await answerFromSource(q, src, { model: MODEL, topK: 3 });
-          return json({ answer: r.answer, pages: r.pages, retrieved: r.retrieved, cited: citedSlugs(r.answer), ms: r.ms, source: src });
+          const dept = DEPARTMENTS.includes(category as Department) ? (category as Department) : undefined;
+          const r = await answerFromSource(q, src, { model: MODEL, department: dept });
+          return json({ answer: r.answer, pages: r.pages, retrieved: r.retrieved, cited: citedSlugs(r.answer), ms: r.ms, source: src, category: dept ?? null });
+        }
+
+        if (url.pathname === "/api/ask-provider" && req.method === "POST") {
+          const { provider } = await readJsonBody<{ provider?: string }>(req);
+          if (provider !== "ollama" && provider !== "gemini") {
+            return json({ error: 'provider must be "ollama" or "gemini"' }, 400);
+          }
+          if (provider === "gemini" && !process.env.GEMINI_API_KEY) {
+            return json({ error: "GEMINI_API_KEY is not set — add it to .env and restart before switching to Gemini" }, 400);
+          }
+          // In-memory only, not persisted to .env — a real server restart
+          // always falls back to .env's own setting, so a demo session can
+          // never accidentally leave hosted-provider mode on permanently.
+          process.env.ASK_PROVIDER = provider;
+          return json({ ok: true, provider, localOnly: !usesHostedProvider() });
         }
 
         if (url.pathname === "/api/page") {
@@ -1193,7 +1243,9 @@ if (import.meta.main) {
 
   console.log(`\n  tako demo  →  http://localhost:${PORT}`);
   console.log(`  model: ${MODEL}   ·   default source: ${DEFAULT_SOURCE}   ·   GBRAIN_HOME=${gbrainHome()}`);
-  console.log(`  local only — retrieval and synthesis both run on Ollama, nothing leaves this machine\n`);
+  console.log(usesHostedProvider()
+    ? `  ⚠ DEMO MODE — synthesis is routed to an external API (Gemini), not local Ollama. Do not use with real customer data.\n`
+    : `  local only — retrieval and synthesis both run on Ollama, nothing leaves this machine\n`);
   // Pre-warm the blocking reads so the stage machine's first paint is instant.
   // The Overview's worked entry stays the hand-verified canned copy — the live
   // 3B model is (correctly) shown only in the Ask tab, where the presenter drives
@@ -1739,6 +1791,14 @@ body { font-family: var(--tako-font); font-size: var(--tako-body); color: var(--
 .tako-status-pill--inactive { background: var(--tako-canvas); color: var(--tako-text-secondary); border: 1px solid var(--tako-border); }
 .tako-automation-templates, .tako-automation-builder { background: var(--tako-surface); border: 1px solid var(--tako-border); border-radius: var(--tako-radius-card); padding: var(--tako-space-4); display: flex; flex-direction: column; gap: var(--tako-space-3); margin-bottom: var(--tako-space-4); }
 .tako-automation-templates[hidden], .tako-automation-builder[hidden] { display: none; }
+.tako-automation-canvas { position: relative; height: 460px; border: 1px solid var(--tako-border); border-radius: var(--tako-radius-card); }
+.tako-canvas-root { position: relative; width: 100%; height: 100%; overflow: hidden; }
+.tako-canvas-node { position: absolute; display: flex; align-items: center; justify-content: center; text-align: center; padding: 8px; border: 1px solid var(--tako-border); border-radius: var(--tako-radius-card); background: var(--tako-surface); cursor: grab; font-size: 13px; }
+.tako-canvas-node--approval { background: var(--tako-accent, #2f5f4f); color: #fff; cursor: default; }
+.tako-canvas-node--inactive { opacity: 0.4; cursor: not-allowed; }
+.tako-canvas-edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.tako-canvas-edge { fill: none; stroke: var(--tako-border); stroke-width: 2; pointer-events: stroke; cursor: pointer; }
+.tako-canvas-drag-line { stroke: var(--tako-accent, #2f5f4f); stroke-width: 2; stroke-dasharray: 4; }
 .tako-template-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--tako-space-2); }
 .tako-template-list li { display: flex; align-items: center; justify-content: space-between; gap: var(--tako-space-2); background: var(--tako-canvas); border: 1px solid var(--tako-border); border-radius: 10px; padding: var(--tako-space-2) var(--tako-space-3); }
 .tako-builder-step { display: flex; align-items: center; gap: var(--tako-space-2); }
@@ -1889,6 +1949,11 @@ body { font-family: var(--tako-font); font-size: var(--tako-body); color: var(--
       <p class="hint" style="margin-top:22px">Tokens are stored in plaintext in this device's <span class="mono">config/connectors.json</span>.
       Production needs an encrypted credential store (onboarding gap #3).</p>
       <div class="request-bubble" role="note"><span class="plus">+</span><span><b>Request an integration</b></span></div>
+
+      <aside class="tako-panel" id="cx-credentials-panel" hidden>
+        <button class="tako-panel-close" id="cx-credentials-panel-close" aria-label="Close">×</button>
+        <div id="cx-credentials-panel-body"></div>
+      </aside>
     </section>
 
     <section class="section" data-name="ask">
@@ -1903,20 +1968,45 @@ body { font-family: var(--tako-font); font-size: var(--tako-body); color: var(--
           <select id="ask-src"></select>
           <button class="file" type="submit">Ask</button>
         </div>
+        <div class="tako-filter-row" id="ask-category-row" style="margin-top:10px;flex-wrap:wrap">
+          <button class="tako-filter" type="button" data-category="" aria-pressed="true" style="white-space:nowrap">All categories</button>
+          ${DEPARTMENTS.map((d) => `<button class="tako-filter" type="button" data-category="${d}" aria-pressed="false" style="white-space:nowrap">${DEPARTMENT_LABELS[d]}</button>`).join("")}
+        </div>
       </form>
+      <div class="tako-filter-row" id="ask-provider-row" style="margin-top:10px;align-items:center;gap:8px">
+        <span class="hint" style="margin:0">Model:</span>
+        <button class="tako-filter" type="button" data-provider="ollama" aria-pressed="true">Ollama (local)</button>
+        <button class="tako-filter" type="button" data-provider="gemini" aria-pressed="false">Gemini (external, demo-only)</button>
+      </div>
+      <p class="hint" id="ask-hosted-warning" hidden style="color:var(--tako-danger,#b00);font-weight:600">⚠ Demo mode: this question and the retrieved document content are sent to an external API (Gemini), not processed locally.</p>
+      <p class="out" id="ask-provider-out" hidden></p>
       <div id="ask-out"></div>
       <details class="tako-advanced">
         <summary>Details</summary>
-        <p class="hint">Answers only from your connected sources, run on a local model ・ <span id="ask-model">—</span></p>
+        <p class="hint">Answers only from your connected sources ・ <span id="ask-model">—</span></p>
       </details>
     </section>
 
     <section class="section" data-name="automations">
       <header class="tako-screen-head">
         <h1>Automations</h1>
+        <!-- Canvas view (lib/connectors/automation-canvas/) is still being
+             built by a separate workstream -- hidden from the UI until it's
+             ready so it can't be reached mid-recording or mid-demo. List
+             stays the only (and default) view; do not remove the canvas
+             code itself, just this entry point. -->
+        <div class="tako-view-toggle" role="group" aria-label="View" hidden>
+          <button class="tako-btn tako-btn--secondary" data-view-toggle="list" aria-pressed="true">List</button>
+          <button class="tako-btn tako-btn--secondary" data-view-toggle="canvas" aria-pressed="false">Canvas</button>
+        </div>
         <button class="tako-btn tako-btn--primary" data-action="new-automation">New automation</button>
       </header>
       <ul class="tako-automation-list" id="automation-list"><li class="tako-skeleton tako-skeleton-row" aria-hidden="true"></li><li class="tako-skeleton tako-skeleton-row" aria-hidden="true"></li></ul>
+
+      <div class="tako-automation-canvas" id="automation-canvas" hidden>
+        <div id="automation-canvas-root"></div>
+        <aside class="tako-panel" id="automation-canvas-detail" hidden></aside>
+      </div>
 
       <div class="tako-empty" id="automations-empty" hidden>
         <p>No automations yet</p>
@@ -2058,12 +2148,51 @@ body { font-family: var(--tako-font); font-size: var(--tako-body); color: var(--
 
     <section class="section" data-name="settings">
       <header class="tako-screen-head"><h1>Settings</h1></header>
-      <p class="tako-supporting">Not available in this view yet.</p>
+
+      <h2>Answer model</h2>
+      <div class="cx-summary">
+        <div class="cx-summary-row"><span class="cx-summary-label">Currently answering with</span><span id="settings-model">—</span></div>
+      </div>
+      <p class="hint">Switch between the local model and the demo-mode external model from <b>Ask Tako → Details</b>.</p>
+
+      <h2 style="margin-top:var(--tako-space-4)">Company brain</h2>
+      <div class="cx-summary">
+        <div class="cx-summary-row"><span class="cx-summary-label">Brain location</span><span id="settings-brain-home" class="mono">—</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Connected sources</span><span id="settings-sources">—</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Indexed documents</span><span id="settings-docs">—</span></div>
+      </div>
+      <p class="hint">Manage which apps feed the brain from <b>Connected Apps</b>.</p>
+
+      <h2 style="margin-top:var(--tako-space-4)">About</h2>
+      <p class="tako-supporting">Tako is an on-premise company knowledge register. It federates read-only
+      connections to your team's tools, answers questions using local models only, and never sends or
+      publishes anything without a named person's approval.</p>
     </section>
 
     <section class="section" data-name="help">
       <header class="tako-screen-head"><h1>Help</h1></header>
-      <p class="tako-supporting">Not available in this view yet.</p>
+
+      <h2>Quick tour</h2>
+      <div class="cx-summary">
+        <div class="cx-summary-row"><span class="cx-summary-label">Home</span><span>Today's activity and what needs you</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Ask Tako</span><span>Ask a question, get a cited answer from one connected source</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Automations</span><span>Teach Tako a trigger-and-steps routine</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Connected Apps</span><span>Connect an app and see its own credential guide</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Tasks</span><span>What's open across your connected sources, triaged</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Activity</span><span>Every action, human or automated, in one log</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Approvals</span><span>Every AI-drafted output waits here for a human decision</span></div>
+        <div class="cx-summary-row"><span class="cx-summary-label">Team & Permissions</span><span>Who can read what, scoped per person</span></div>
+      </div>
+
+      <h2 style="margin-top:var(--tako-space-4)">Connecting an app</h2>
+      <p class="tako-supporting">Open <b>Connected Apps</b>, choose a service, and click
+      <b>"Where do I get this token?"</b> on its card — each one opens a step-by-step guide for that
+      specific service, right inside the app.</p>
+
+      <h2 style="margin-top:var(--tako-space-4)">How an answer is checked</h2>
+      <p class="tako-supporting">質問 (Ask) → 検索 (Retrieve, cited) → 下書き (Draft, local model only)
+      → フィルタ (Filter / mask sensitive info) → 人間の承認 (Human approval — required). Tako never
+      skips the last step on its own.</p>
     </section>
 
   </div></main>
@@ -2078,10 +2207,40 @@ body { font-family: var(--tako-font); font-size: var(--tako-body); color: var(--
   <div class="body" id="dr-body"></div>
 </aside>
 
+<script src="/vendor/node-canvas.js"></script>
 <script type="module">
 const $=(s,r=document)=>r.querySelector(s);
 const $$=(s,r=document)=>[...r.querySelectorAll(s)];
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+/* Minimal Markdown → HTML for rendering our own docs/connectors/*.md guides
+   inside the app (headings, bold, inline code, code fences, links, lists,
+   paragraphs) — no dependency, and the input is our own repo content. */
+function mdToHtml(md){
+  const inline=s=>esc(s)
+    .replace(/\\\`([^\\\`]+)\\\`/g,'<code>$1</code>')
+    .replace(/\\*\\*([^*]+)\\*\\*/g,'<strong>$1</strong>')
+    .replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+  let html='',inCode=false,listOpen=null;
+  const closeList=()=>{if(listOpen){html+='</'+listOpen+'>';listOpen=null;}};
+  for(const raw of md.split('\\n')){
+    if(raw.trim().startsWith('\`\`\`')){
+      if(!inCode){closeList();html+='<pre><code>';inCode=true;}
+      else{html+='</code></pre>';inCode=false;}
+      continue;
+    }
+    if(inCode){html+=esc(raw)+'\\n';continue;}
+    const h=raw.match(/^(#{1,3})\\s+(.*)$/);
+    if(h){closeList();const n=h[1].length+1;html+='<h'+n+'>'+inline(h[2])+'</h'+n+'>';continue;}
+    const ol=raw.match(/^\\d+\\.\\s+(.*)$/);
+    if(ol){if(listOpen!=='ol'){closeList();html+='<ol>';listOpen='ol';}html+='<li>'+inline(ol[1])+'</li>';continue;}
+    const ul=raw.match(/^[-*]\\s+(.*)$/);
+    if(ul){if(listOpen!=='ul'){closeList();html+='<ul>';listOpen='ul';}html+='<li>'+inline(ul[1])+'</li>';continue;}
+    if(!raw.trim()){closeList();continue;}
+    closeList();html+='<p>'+inline(raw)+'</p>';
+  }
+  closeList();
+  return html;
+}
 const api=async(p,o)=>{const r=await fetch(p,o);const j=await r.json();if(!r.ok)throw new Error(j.error||'request failed');return j};
 /* Admin-gated mutating routes need an X-Admin-Token header. The page itself
    stays unauthenticated (public demo screens must stay reachable) — only these
@@ -2203,6 +2362,12 @@ async function loadHome(){
   try{
     const o=await api('/api/overview');
     $('#ask-model').textContent=o.model;
+    $('#ask-hosted-warning').hidden=o.localOnly!==false;
+    $$('#ask-provider-row .tako-filter').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.provider===(o.localOnly===false?'gemini':'ollama'))));
+    $('#settings-model').textContent=o.model;
+    $('#settings-brain-home').textContent=o.gbrainHome||'—';
+    $('#settings-sources').textContent=o.totals.sources;
+    $('#settings-docs').textContent=o.totals.docs;
     // ask-source options — populated here since this is the one unconditional load on boot
     $('#ask-src').innerHTML=o.sources.map(s=>'<option value="'+esc(s.id)+'">'+esc(s.name)+' ('+s.docs+')</option>').join('');
 
@@ -2225,17 +2390,39 @@ async function loadHome(){
 }
 
 /* ── ask ── */
+let askCategory='';
+$$('#ask-category-row .tako-filter').forEach(btn=>btn.addEventListener('click',()=>{
+  askCategory=btn.dataset.category||'';
+  $$('#ask-category-row .tako-filter').forEach(b=>b.setAttribute('aria-pressed',String(b===btn)));
+}));
+$$('#ask-provider-row .tako-filter').forEach(btn=>btn.addEventListener('click',async()=>{
+  const provider=btn.dataset.provider;
+  const out=$('#ask-provider-out');
+  out.hidden=false;out.className='out';out.textContent='Switching…';
+  try{
+    const r=await adminApi('/api/ask-provider',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({provider})});
+    $$('#ask-provider-row .tako-filter').forEach(b=>b.setAttribute('aria-pressed',String(b===btn)));
+    $('#ask-hosted-warning').hidden=r.localOnly!==false;
+    out.className='out ok';out.textContent='Switched to '+provider+' — takes effect on your next question.';
+    loadHome(true);
+  }catch(e){out.className='out bad';out.textContent=e.message;}
+}));
 $('#ask-form').addEventListener('submit',async e=>{
   e.preventDefault();
   const q=$('#ask-q').value.trim();if(!q)return;
   const src=$('#ask-src').value;
   const btn=$('button.file');btn.disabled=true;
-  $('#ask-out').innerHTML='<div class="working"><span class="ring"></span>Checking your connected apps… the first run loads the model, 30–60s</div>';
+  // Each question gets its own holder, prepended above earlier ones, so
+  // asking again doesn't erase the previous answer -- an in-session history,
+  // not persisted across a reload (no server-side storage for it).
+  const holder=document.createElement('div');
+  holder.innerHTML='<div class="working"><span class="ring"></span>Checking your connected apps…</div>';
+  $('#ask-out').insertBefore(holder,$('#ask-out').firstChild);
   try{
-    const r=await api('/api/ask',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:q,source:src})});
-    $('#ask-out').innerHTML=entryHtml({question:q,...r},{stamp:true});
-    wireCites($('#ask-out'));
-  }catch(err){$('#ask-out').innerHTML='<div class="note-err">'+esc(err.message)+'</div>';}
+    const r=await api('/api/ask',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:q,source:src,category:askCategory})});
+    holder.innerHTML=entryHtml({question:q,...r},{stamp:true});
+    wireCites(holder);
+  }catch(err){holder.innerHTML='<div class="note-err">'+esc(err.message)+'</div>';}
   finally{btn.disabled=false;}
 });
 
@@ -2254,6 +2441,7 @@ function openPermissionsPanel(idx){
   $('#permissions-panel').hidden=false;
 }
 $('#permissions-panel-close')?.addEventListener('click',()=>{$('#permissions-panel').hidden=true;});
+$('#cx-credentials-panel-close')?.addEventListener('click',()=>{$('#cx-credentials-panel').hidden=true;});
 async function loadAccess(force){
   if(accessLoaded&&!force)return;accessLoaded=true;
   try{
@@ -2335,9 +2523,61 @@ async function loadSkills(force){
   }
 }
 
+const CONNECTOR_NODE_LABELS = {
+  drive: "Google Drive", notion: "Notion", slack: "Slack",
+  schedule: "Every Monday", manual: "Manual",
+  discord: "Discord", notes: "Local Notes", cad: "CAD", extend: "Extend",
+};
+const INACTIVE_NODE_IDS = ["discord", "notes", "cad", "extend"];
+
+function openCanvasActionPicker(fromNodeId) { /* Task 5 */ }
+function openCanvasEdgeDetail(edgeId, edges) { /* Task 5 */ }
+
+async function loadCanvas() {
+  const data = await fetch('/api/skills').then(r => r.json());
+  const edges = [];
+  for (const skill of data.skills) {
+    // skillToEdge/edgeInputToAutomationPayload logic is duplicated here in
+    // plain JS (this inline script has no module import system) — kept in
+    // sync with lib/connectors/automation-canvas/adapter.ts by using the
+    // same TRIGGER_NODE_TO_STRING global interpolated above, rather than a
+    // separately hand-typed copy.
+    const triggerNode = Object.keys(TRIGGER_NODE_TO_STRING).find(k => TRIGGER_NODE_TO_STRING[k] === skill.trigger);
+    if (!triggerNode || skill.procedureSteps.length !== 2) continue;
+    edges.push({
+      id: skill.name, fromNodeId: triggerNode, toNodeId: "approval",
+      label: skill.procedureSteps.join(' -> '),
+      actionSteps: skill.procedureSteps,
+    });
+  }
+  const nodes = [
+    ...Object.keys(CONNECTOR_NODE_LABELS).map(id => ({
+      id, label: CONNECTOR_NODE_LABELS[id], kind: "connector",
+      active: !INACTIVE_NODE_IDS.includes(id),
+    })),
+    { id: "approval", label: "Approval", kind: "approval", active: true },
+  ];
+  window.TakoNodeCanvas.render(document.getElementById('automation-canvas-root'), {
+    nodes, edges,
+    onEdgeDragCreate: (fromNodeId) => openCanvasActionPicker(fromNodeId), // Task 5
+    onEdgeSelect: (edgeId) => openCanvasEdgeDetail(edgeId, edges),        // Task 5
+  });
+}
+
+document.querySelectorAll('[data-view-toggle]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const view = btn.dataset.viewToggle;
+    document.querySelectorAll('[data-view-toggle]').forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
+    document.getElementById('automation-list').hidden = view !== 'list';
+    document.getElementById('automation-canvas').hidden = view !== 'canvas';
+    if (view === 'canvas') loadCanvas();
+  });
+});
+
 /* New automation: templates first, never a blank builder directly. */
 const AB_TRIGGER_OPTIONS=${JSON.stringify(AB_TRIGGER_OPTIONS)};
 const AB_ACTION_OPTIONS=${JSON.stringify(AB_ACTION_OPTIONS)};
+const TRIGGER_NODE_TO_STRING=${JSON.stringify(TRIGGER_NODE_TO_STRING)};
 const AUTOMATION_TEMPLATES=[
   {name:'Summarize new Drive files to Slack', trigger:'New file added to Drive', action1:'Summarize the content', action2:'Post to Slack'},
   {name:'Notify on a new Notion page', trigger:'New page added to Notion', action1:'Draft a notification', action2:'Notify the team channel'},
@@ -2573,6 +2813,7 @@ function selectCx(name,openAdvanced){
       +'<div class="cx-summary-row"><span class="cx-summary-label">Feeds into</span><span>'+esc(r.subdir||'—')+'</span></div>'
       +'<div class="cx-summary-row"><span class="cx-summary-label">Last synced</span><span class="cx-lastsync">'+(r.lastSync?fmtDate(r.lastSync):'Never synced')+'</span></div>'
     +'</div>'
+    +(r.credentialsDocUrl?'<p class="hint cx-credentials-link"><button class="cx-credentials-btn" type="button" data-doc="'+esc(r.credentialsDocUrl)+'">Where do I get this token? →</button></p>':'')
     +'<div class="cx-summary-actions">'
       +'<button class="tako-btn tako-btn--primary cx-manage" type="button">Manage</button>'
       +(r.configured&&cxState.canSave?'<button class="tako-btn tako-btn--secondary cx-sync-now" type="button">Sync now</button>':'')
@@ -2592,6 +2833,17 @@ function selectCx(name,openAdvanced){
   panel.hidden=false;
   const advanced=$('.tako-advanced',panel);
   $('.cx-manage',panel).addEventListener('click',()=>{advanced.open=true;advanced.scrollIntoView({behavior:'smooth',block:'nearest'});});
+  const credsBtn=$('.cx-credentials-btn',panel);
+  if(credsBtn)credsBtn.addEventListener('click',async()=>{
+    const body=$('#cx-credentials-panel-body');
+    body.innerHTML='<p class="hint">Loading…</p>';
+    $('#cx-credentials-panel').hidden=false;
+    try{
+      const res=await fetch(credsBtn.dataset.doc);
+      if(!res.ok)throw new Error('Could not load this guide (HTTP '+res.status+').');
+      body.innerHTML=mdToHtml(await res.text());
+    }catch(e){body.innerHTML='<p class="note-err">'+esc(e.message)+'</p>';}
+  });
   const out=$('.out',panel);
   const vals=()=>{const o={name};$$('input[data-k]',panel).forEach(i=>o[i.dataset.k]=i.value);return o;};
   const save=$('.save',panel);

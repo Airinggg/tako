@@ -42,7 +42,10 @@ export const DEFAULT_RULES: RedactionRule[] = [
   { name: "private-key", label: "秘密鍵ブロック / private key block", action: "block",
     pattern: "-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\\s\\S]*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----" },
   { name: "api-secret", label: "APIキー・トークン / API key or token", action: "block",
-    pattern: "\\b(?:sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|ya29\\.[A-Za-z0-9_-]{20,}|ntn_[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{20,})" },
+    // sk- keys allow "-"/"_" in the body (not just alnum): OpenAI's current
+    // project-scoped format is "sk-proj-<...>", and other sk--prefixed keys
+    // commonly segment the same way — a flat alnum-only class missed those.
+    pattern: "\\b(?:sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|ya29\\.[A-Za-z0-9_-]{20,}|ntn_[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{20,})" },
   { name: "bearer", label: "Bearer トークン / bearer token", action: "block",
     pattern: "Bearer\\s+[A-Za-z0-9._-]{16,}" },
   { name: "credit-card", label: "カード番号らしき数字 / card-like number", action: "block",

@@ -21,6 +21,16 @@ test("blocks on an API token and reports blocked", () => {
   assert.equal(r.hits[0].action, "block");
 });
 
+test("blocks a hyphenated sk- style token (e.g. OpenAI's sk-proj- project keys)", () => {
+  // Real-world sk- tokens aren't always a flat alnum run -- OpenAI's current
+  // project-scoped key format is "sk-proj-<...>", and this also covers any
+  // other "sk-<segment>-<segment>" shaped key a demo/test string might use.
+  const r = redact("API token sk-test-abcdef1234567890 leaked in the log");
+  assert.equal(r.blocked, true);
+  assert.ok(r.hits.some((h) => h.rule === "api-secret"));
+  assert.ok(!r.text.includes("sk-test-abcdef1234567890"));
+});
+
 test("credit-card rule only fires on a Luhn-valid number", () => {
   const valid = redact("card 4111 1111 1111 1111 on file");     // Luhn-valid test number
   assert.equal(valid.blocked, true);
