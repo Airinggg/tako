@@ -68,15 +68,20 @@ export function draftMeetingProposal(
 }
 
 /** A human supplies the concrete time/duration/participants and confirms.
- *  Requires the proposal to still be `draft` (a proposal can only be
- *  confirmed once), a parseable `proposedStartAt`, and a non-blank
- *  `confirmedBy` — no meeting detail is guessed. */
+ *  Requires the proposal to be `draft` OR already `confirmed` (a `confirmed`
+ *  proposal can be re-confirmed — this is what makes it possible to retry
+ *  after a failed Zoom call: scripts/demo.ts's confirmZoomMeeting() persists
+ *  the proposal as "confirmed" before calling Zoom, so a failed call must
+ *  still allow re-POSTing confirm with the same proposalId), a parseable
+ *  `proposedStartAt`, and a non-blank `confirmedBy` — no meeting detail is
+ *  guessed. Rejects `created`: an already-created meeting must never be
+ *  re-confirmed. */
 export function confirmMeetingProposal(
   proposal: MeetingProposal,
   input: { proposedStartAt: string; proposedDurationMinutes?: number; participantEmails: string[]; confirmedBy: string; now?: string },
 ): MeetingProposal {
-  if (proposal.status !== "draft") {
-    throw new Error(`meeting proposal "${proposal.id}" must be "draft" to confirm (current status: "${proposal.status}")`);
+  if (proposal.status !== "draft" && proposal.status !== "confirmed") {
+    throw new Error(`meeting proposal "${proposal.id}" must be "draft" or "confirmed" to confirm (current status: "${proposal.status}")`);
   }
   if (Number.isNaN(Date.parse(input.proposedStartAt))) {
     throw new Error(`proposedStartAt "${input.proposedStartAt}" is not a valid date`);

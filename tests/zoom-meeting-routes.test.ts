@@ -6,6 +6,7 @@ import test from "node:test";
 import { newKnowledgeItem } from "../lib/knowledge/model.ts";
 import { upsertKnowledgeItem } from "../lib/knowledge/store.ts";
 import { loadMeetingProposals } from "../lib/integrations/zoom/proposal-store.ts";
+import { ClientError } from "../lib/util/http-security.ts";
 import { confirmZoomMeeting, proposeZoomMeeting } from "../scripts/demo.ts";
 
 const NOW = "2026-09-23T00:00:00.000Z";
@@ -103,5 +104,61 @@ test("confirmZoomMeeting leaves the proposal confirmed (not created) when Zoom's
     );
     const stored = loadMeetingProposals(proposalStorePath);
     assert.equal(stored.find((p) => p.id === proposal.id)?.status, "confirmed");
+  });
+});
+
+test("confirmZoomMeeting: fail, fix, retry, succeed — a second confirm with the same proposalId succeeds after the first Zoom call fails", async () => {
+  await withTempStores(async ({ knowledgeStorePath, proposalStorePath }) => {
+    const item = unresolvedItem();
+    upsertKnowledgeItem(item, knowledgeStorePath);
+    const proposal = proposeZoomMeeting({ knowledgeItemId: item.id, createdBy: "Taro" }, { knowledgeStorePath, proposalStorePath, now: NOW });
+
+    const failingFetch = (async () => new Response("invalid_client", { status: 401 })) as typeof fetch;
+    await assert.rejects(
+      confirmZoomMeeting(
+        { proposalId: proposal.id, proposedStartAt: "2026-10-01T09:00:00.000Z", participantEmails: [], confirmedBy: "Grace" },
+        { proposalStorePath, now: NOW, zoomCredentials: { accountId: "a", clientId: "b", clientSecret: "c" }, fetchImpl: failingFetch },
+      ),
+    );
+    assert.equal(loadMeetingProposals(proposalStorePath).find((p) => p.id === proposal.id)?.status, "confirmed");
+
+    // Retry: re-POST confirm with the same proposalId, now with working credentials/fetch.
+    const succeedingFetch = (async (url: string) => {
+      if (String(url).includes("oauth/token")) return new Response(JSON.stringify({ access_token: "fake-token" }), { status: 200 });
+      return new Response(JSON.stringify({ id: 222, join_url: "https://zoom.us/j/222", start_url: "https://zoom.us/s/222" }), { status: 201 });
+    }) as typeof fetch;
+
+    const result = await confirmZoomMeeting(
+      { proposalId: proposal.id, proposedStartAt: "2026-10-01T09:00:00.000Z", participantEmails: ["grace@example.com"], confirmedBy: "Grace" },
+      { proposalStorePath, now: "2026-09-24T00:00:00.000Z", zoomCredentials: { accountId: "a", clientId: "b", clientSecret: "c" }, fetchImpl: succeedingFetch },
+    );
+
+    assert.equal(result.status, "created");
+    const stored = loadMeetingProposals(proposalStorePath);
+    assert.equal(stored.find((p) => p.id === proposal.id)?.status, "created");
+  });
+});
+
+test("confirmZoomMeeting sanitizes a Zoom API failure into an operator-facing ClientError, never echoing the raw response body", async () => {
+  await withTempStores(async ({ knowledgeStorePath, proposalStorePath }) => {
+    const item = unresolvedItem();
+    upsertKnowledgeItem(item, knowledgeStorePath);
+    const proposal = proposeZoomMeeting({ knowledgeItemId: item.id, createdBy: "Taro" }, { knowledgeStorePath, proposalStorePath, now: NOW });
+
+    const fetchImpl = (async () => new Response("super-secret-internal-detail", { status: 401 })) as typeof fetch;
+
+    let caught: unknown;
+    try {
+      await confirmZoomMeeting(
+        { proposalId: proposal.id, proposedStartAt: "2026-10-01T09:00:00.000Z", participantEmails: [], confirmedBy: "Grace" },
+        { proposalStorePath, now: NOW, zoomCredentials: { accountId: "a", clientId: "b", clientSecret: "c" }, fetchImpl },
+      );
+    } catch (err) {
+      caught = err;
+    }
+    assert.ok(caught instanceof ClientError, "expected a ClientError, not a plain Error");
+    const message = (caught as Error).message;
+    assert.match(message, /Zoom API request failed \(status 401\)/);
+    assert.doesNotMatch(message, /super-secret-internal-detail/);
   });
 });

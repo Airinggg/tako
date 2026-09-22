@@ -79,11 +79,39 @@ test("confirmMeetingProposal defaults duration to 30 when omitted", () => {
   assert.equal(confirmed.proposedDurationMinutes, 30);
 });
 
-test("confirmMeetingProposal refuses a non-draft proposal, an invalid date, or a blank confirmedBy", () => {
+test("confirmMeetingProposal refuses a created proposal, an invalid date, or a blank confirmedBy", () => {
   const already = confirmMeetingProposal(draft(), { proposedStartAt: "2026-10-01T09:00:00.000Z", participantEmails: [], confirmedBy: "Grace", now: NOW });
-  assert.throws(() => confirmMeetingProposal(already, { proposedStartAt: "2026-10-01T09:00:00.000Z", participantEmails: [], confirmedBy: "Grace", now: NOW }), /draft/);
+  const created = markMeetingCreated(already, { id: "1", joinUrl: "https://zoom.us/j/1", startUrl: "https://zoom.us/s/1" }, NOW);
+  assert.throws(() => confirmMeetingProposal(created, { proposedStartAt: "2026-10-01T09:00:00.000Z", participantEmails: [], confirmedBy: "Grace", now: NOW }), /draft.*confirmed/);
   assert.throws(() => confirmMeetingProposal(draft(), { proposedStartAt: "not-a-date", participantEmails: [], confirmedBy: "Grace", now: NOW }), /proposedStartAt/);
   assert.throws(() => confirmMeetingProposal(draft(), { proposedStartAt: "2026-10-01T09:00:00.000Z", participantEmails: [], confirmedBy: "", now: NOW }), /confirmedBy/);
+});
+
+test("confirmMeetingProposal accepts an already-confirmed proposal and re-confirms it with new details (retry-after-failure path)", () => {
+  const firstConfirm = confirmMeetingProposal(draft(), {
+    proposedStartAt: "2026-10-01T09:00:00.000Z",
+    proposedDurationMinutes: 30,
+    participantEmails: ["grace@example.com"],
+    confirmedBy: "Grace",
+    now: "2026-09-24T00:00:00.000Z",
+  });
+  assert.equal(firstConfirm.status, "confirmed");
+
+  // Simulates re-POSTing confirm after the Zoom API call failed: same
+  // proposal, still "confirmed", new input supplied by the retry.
+  const secondConfirm = confirmMeetingProposal(firstConfirm, {
+    proposedStartAt: "2026-10-02T10:00:00.000Z",
+    proposedDurationMinutes: 60,
+    participantEmails: ["grace@example.com", "taro@example.com"],
+    confirmedBy: "Taro",
+    now: "2026-09-24T01:00:00.000Z",
+  });
+  assert.equal(secondConfirm.status, "confirmed");
+  assert.equal(secondConfirm.proposedStartAt, "2026-10-02T10:00:00.000Z");
+  assert.equal(secondConfirm.proposedDurationMinutes, 60);
+  assert.deepEqual(secondConfirm.participantEmails, ["grace@example.com", "taro@example.com"]);
+  assert.equal(secondConfirm.confirmedBy, "Taro");
+  assert.equal(secondConfirm.confirmedAt, "2026-09-24T01:00:00.000Z");
 });
 
 test("markMeetingCreated moves confirmed -> created and attaches the real Zoom result", () => {
