@@ -10,13 +10,14 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
+import { gbrainHome } from "../lib/eval/qa.ts";
 import { grantsForScope, parseSkillFrontmatter, type SkillFrontmatter } from "../lib/scopes/grants.ts";
 import { buildTree, excluded, included, type Scope } from "../lib/scopes/model.ts";
 import { ClientError, readJsonBody, requireAdmin, resolveAdminToken, safeErrorResponse } from "../lib/util/http-security.ts";
 
 const REPO = join(import.meta.dir, "..");
 const BRAIN_CLI = join(REPO, "packages/brain/src/cli.ts");
-const GBRAIN_HOME = join(process.env.HOME || "", ".aletheia-brain");
+const GBRAIN_HOME = gbrainHome();
 const SCOPES_PATH = join(REPO, "config/scopes.json");
 const BRAIN_SOURCES = join(REPO, "brain-sources");
 const PORT = Number(process.env.PORT) || 4321;
