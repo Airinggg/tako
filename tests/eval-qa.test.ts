@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { asksForLatest, buildAnswerPrompt, extractPageDate, usesHostedProvider } from "../lib/eval/qa.ts";
+import { asksForLatest, buildAnswerPrompt, extractPageDate, geminiAnswer, usesHostedProvider } from "../lib/eval/qa.ts";
+import { ClientError } from "../lib/util/http-security.ts";
+
+function fakeGeminiResponse(status: number, body: unknown): Response {
+  return new Response(typeof body === "string" ? body : JSON.stringify(body), { status });
+}
 
 test("usesHostedProvider defaults to local Ollama, never opts into a hosted API by itself", () => {
   const original = process.env.ASK_PROVIDER;
@@ -87,4 +92,69 @@ test("buildAnswerPrompt never lets document content reach an approval/state-chan
   assert.deepEqual(Object.keys(result).sort(), ["prompt", "system"]);
   assert.equal(typeof result.system, "string");
   assert.equal(typeof result.prompt, "string");
+});
+
+test("geminiAnswer retries a transient 503 and succeeds once Google recovers", async () => {
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls++;
+    if (calls < 3) {
+      return fakeGeminiResponse(503, { error: { code: 503, message: "overloaded", status: "UNAVAILABLE" } });
+    }
+    return fakeGeminiResponse(200, { candidates: [{ content: { parts: [{ text: "the answer" }] } }] });
+  }) as typeof fetch;
+  try {
+    const answer = await geminiAnswer("q", { apiKey: "test-key" });
+    assert.equal(answer, "the answer");
+    assert.equal(calls, 3, "should retry the two transient failures before succeeding");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("geminiAnswer surfaces Google's own error message via ClientError once retries are exhausted", async () => {
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls++;
+    return fakeGeminiResponse(503, {
+      error: { code: 503, message: "This model is currently experiencing high demand.", status: "UNAVAILABLE" },
+    });
+  }) as typeof fetch;
+  try {
+    await assert.rejects(
+      () => geminiAnswer("q", { apiKey: "test-key" }),
+      (err: unknown) => {
+        assert.ok(err instanceof ClientError, "a retryable-but-exhausted Gemini failure must be a ClientError, not a masked plain Error");
+        assert.match(err.message, /This model is currently experiencing high demand/);
+        return true;
+      },
+    );
+    assert.equal(calls, 3, "should attempt exactly 3 times before giving up");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("geminiAnswer does not retry a non-transient error (e.g. a bad API key)", async () => {
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls++;
+    return fakeGeminiResponse(400, { error: { code: 400, message: "API key not valid", status: "INVALID_ARGUMENT" } });
+  }) as typeof fetch;
+  try {
+    await assert.rejects(
+      () => geminiAnswer("q", { apiKey: "bad-key" }),
+      (err: unknown) => {
+        assert.ok(err instanceof ClientError);
+        assert.match((err as ClientError).message, /API key not valid/);
+        return true;
+      },
+    );
+    assert.equal(calls, 1, "a non-retryable status should fail on the first attempt, not retry");
+  } finally {
+    globalThis.fetch = original;
+  }
 });
