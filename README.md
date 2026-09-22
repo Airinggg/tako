@@ -42,8 +42,22 @@ Tako never sends or publishes anything on its own.
   the P1 (real-customer-pilot) items that matter for a single-tenant
   instance are closed too — see that file for the current line-by-line
   state and `docs/audit/` for the underlying evidence.
+- Ask can narrow a question by department (Finance/HR/Engineering/Sales/
+  Legal/Operations/General) via keyword-based classification
+  (`lib/govern/categorize.ts`) — deliberately independent of the
+  access-control `subdir` scope, so a wrong classification only misfiles
+  something for browsing, never exposes it. This is a real-time filter on
+  one source's search results, not a persistent index or a memory of past
+  questions.
+- Settings and Help are real, live screens now (model/provider state, brain
+  location, connected-source counts, a quick app tour, and the credential
+  guides), not placeholders.
 - The evaluation has run on synthetic data only so far. Running it on Lirem's
   real data is the thesis milestone still ahead.
+- Designed but not yet built: a **Digest** feature (proactive "what
+  changed" / contradiction surfacing + a per-topic history across sources)
+  — see `docs/superpowers/specs/2026-09-22-company-brain-digest-design.md`
+  and its implementation plan in `docs/superpowers/plans/`.
 
 ## Run it locally (macOS)
 
@@ -129,9 +143,15 @@ those providers' terms of service and is not something this project will
 build.
 
 Google's Gemini API does have a genuine free tier issued from Google AI
-Studio, separate from a "Gemini" app subscription — a locally-run,
-tenant-data-safe way to use it (gated behind the on-premise rule above) is
-possible future work, not built yet.
+Studio, separate from a "Gemini" app subscription. Tako has an explicit,
+opt-in **demo-mode** switch to it (`ASK_PROVIDER=gemini` in `.env`, or the
+in-app toggle on the Ask screen) for when the local model is too slow to
+demo with — it is never the default, every screen that claims "local only"
+checks the real state (`usesHostedProvider()` in `lib/eval/qa.ts`) instead
+of assuming it, and both the server startup log and the Ask screen show an
+explicit warning while it's active. This is a demo convenience, not a
+tenant-data-safe production path — do not enable it with real customer
+data.
 
 ## The earlier prototype
 
