@@ -10,7 +10,7 @@ export type DoctorCheck = {
 };
 
 const MIN_BUN_VERSION = "1.3.10";
-const REQUIRED_MODELS = ["bge-m3", "qwen2.5:3b-instruct"];
+export const REQUIRED_MODELS = ["bge-m3", "qwen2.5:3b-instruct"];
 
 function compareVersions(a: string, b: string): number {
   const pa = a.split(".").map(Number);
