@@ -2407,12 +2407,17 @@ $('#ask-form').addEventListener('submit',async e=>{
   const q=$('#ask-q').value.trim();if(!q)return;
   const src=$('#ask-src').value;
   const btn=$('button.file');btn.disabled=true;
-  $('#ask-out').innerHTML='<div class="working"><span class="ring"></span>Checking your connected apps…</div>';
+  // Each question gets its own holder, prepended above earlier ones, so
+  // asking again doesn't erase the previous answer -- an in-session history,
+  // not persisted across a reload (no server-side storage for it).
+  const holder=document.createElement('div');
+  holder.innerHTML='<div class="working"><span class="ring"></span>Checking your connected apps…</div>';
+  $('#ask-out').insertBefore(holder,$('#ask-out').firstChild);
   try{
     const r=await api('/api/ask',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:q,source:src,category:askCategory})});
-    $('#ask-out').innerHTML=entryHtml({question:q,...r},{stamp:true});
-    wireCites($('#ask-out'));
-  }catch(err){$('#ask-out').innerHTML='<div class="note-err">'+esc(err.message)+'</div>';}
+    holder.innerHTML=entryHtml({question:q,...r},{stamp:true});
+    wireCites(holder);
+  }catch(err){holder.innerHTML='<div class="note-err">'+esc(err.message)+'</div>';}
   finally{btn.disabled=false;}
 });
 
