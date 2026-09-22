@@ -42,6 +42,7 @@ import { categorizeText, DEPARTMENT_LABELS, DEPARTMENTS, type Department } from 
 import { diffGitStatus, formatSyncLogLines, hashContent, parseGitStatus, type SyncLogEntry } from "../lib/govern/sync-log.ts";
 import { checkRateLimit, ClientError, clientKey, readJsonBody, requireAdmin, resolveAdminToken, safeErrorResponse } from "../lib/util/http-security.ts";
 import { writePrivateFileAtomic } from "../lib/util/private-file.ts";
+import { TRIGGER_NODE_TO_STRING } from "../lib/connectors/automation-canvas/adapter.ts";
 
 const REPO = import.meta.dir ? join(import.meta.dir, "..") : process.cwd();
 
@@ -1104,6 +1105,11 @@ if (import.meta.main) {
         // matched against the exact filenames CONNECTOR_SPECS references —
         // never resolved from the URL itself — so this cannot be used for
         // directory traversal or to serve arbitrary repo files.
+        if (url.pathname === "/vendor/node-canvas.js") {
+          const file = Bun.file(new URL("../scripts/vendor/node-canvas.js", import.meta.url));
+          return new Response(file, { headers: { "content-type": "text/javascript; charset=utf-8" } });
+        }
+
         if (url.pathname.startsWith("/docs/connectors/")) {
           const requested = url.pathname.slice("/docs/connectors/".length);
           const known = new Set(Object.values(CONNECTOR_SPECS).map((s) => s.credentialsDoc).filter(Boolean));
@@ -1785,6 +1791,14 @@ body { font-family: var(--tako-font); font-size: var(--tako-body); color: var(--
 .tako-status-pill--inactive { background: var(--tako-canvas); color: var(--tako-text-secondary); border: 1px solid var(--tako-border); }
 .tako-automation-templates, .tako-automation-builder { background: var(--tako-surface); border: 1px solid var(--tako-border); border-radius: var(--tako-radius-card); padding: var(--tako-space-4); display: flex; flex-direction: column; gap: var(--tako-space-3); margin-bottom: var(--tako-space-4); }
 .tako-automation-templates[hidden], .tako-automation-builder[hidden] { display: none; }
+.tako-automation-canvas { position: relative; height: 460px; border: 1px solid var(--tako-border); border-radius: var(--tako-radius-card); }
+.tako-canvas-root { position: relative; width: 100%; height: 100%; overflow: hidden; }
+.tako-canvas-node { position: absolute; display: flex; align-items: center; justify-content: center; text-align: center; padding: 8px; border: 1px solid var(--tako-border); border-radius: var(--tako-radius-card); background: var(--tako-surface); cursor: grab; font-size: 13px; }
+.tako-canvas-node--approval { background: var(--tako-accent, #2f5f4f); color: #fff; cursor: default; }
+.tako-canvas-node--inactive { opacity: 0.4; cursor: not-allowed; }
+.tako-canvas-edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.tako-canvas-edge { fill: none; stroke: var(--tako-border); stroke-width: 2; pointer-events: stroke; cursor: pointer; }
+.tako-canvas-drag-line { stroke: var(--tako-accent, #2f5f4f); stroke-width: 2; stroke-dasharray: 4; }
 .tako-template-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--tako-space-2); }
 .tako-template-list li { display: flex; align-items: center; justify-content: space-between; gap: var(--tako-space-2); background: var(--tako-canvas); border: 1px solid var(--tako-border); border-radius: 10px; padding: var(--tako-space-2) var(--tako-space-3); }
 .tako-builder-step { display: flex; align-items: center; gap: var(--tako-space-2); }
@@ -1976,9 +1990,18 @@ body { font-family: var(--tako-font); font-size: var(--tako-body); color: var(--
     <section class="section" data-name="automations">
       <header class="tako-screen-head">
         <h1>Automations</h1>
+        <div class="tako-view-toggle" role="group" aria-label="View">
+          <button class="tako-btn tako-btn--secondary" data-view-toggle="list" aria-pressed="true">List</button>
+          <button class="tako-btn tako-btn--secondary" data-view-toggle="canvas" aria-pressed="false">Canvas</button>
+        </div>
         <button class="tako-btn tako-btn--primary" data-action="new-automation">New automation</button>
       </header>
       <ul class="tako-automation-list" id="automation-list"><li class="tako-skeleton tako-skeleton-row" aria-hidden="true"></li><li class="tako-skeleton tako-skeleton-row" aria-hidden="true"></li></ul>
+
+      <div class="tako-automation-canvas" id="automation-canvas" hidden>
+        <div id="automation-canvas-root"></div>
+        <aside class="tako-panel" id="automation-canvas-detail" hidden></aside>
+      </div>
 
       <div class="tako-empty" id="automations-empty" hidden>
         <p>No automations yet</p>
@@ -2179,6 +2202,7 @@ body { font-family: var(--tako-font); font-size: var(--tako-body); color: var(--
   <div class="body" id="dr-body"></div>
 </aside>
 
+<script src="/vendor/node-canvas.js"></script>
 <script type="module">
 const $=(s,r=document)=>r.querySelector(s);
 const $$=(s,r=document)=>[...r.querySelectorAll(s)];
@@ -2489,9 +2513,61 @@ async function loadSkills(force){
   }
 }
 
+const CONNECTOR_NODE_LABELS = {
+  drive: "Google Drive", notion: "Notion", slack: "Slack",
+  schedule: "Every Monday", manual: "Manual",
+  discord: "Discord", notes: "Local Notes", cad: "CAD", mcp: "MCP",
+};
+const INACTIVE_NODE_IDS = ["discord", "notes", "cad", "mcp"];
+
+function openCanvasActionPicker(fromNodeId) { /* Task 5 */ }
+function openCanvasEdgeDetail(edgeId, edges) { /* Task 5 */ }
+
+async function loadCanvas() {
+  const data = await fetch('/api/skills').then(r => r.json());
+  const edges = [];
+  for (const skill of data.skills) {
+    // skillToEdge/edgeInputToAutomationPayload logic is duplicated here in
+    // plain JS (this inline script has no module import system) — kept in
+    // sync with lib/connectors/automation-canvas/adapter.ts by using the
+    // same TRIGGER_NODE_TO_STRING global interpolated above, rather than a
+    // separately hand-typed copy.
+    const triggerNode = Object.keys(TRIGGER_NODE_TO_STRING).find(k => TRIGGER_NODE_TO_STRING[k] === skill.trigger);
+    if (!triggerNode || skill.procedureSteps.length !== 2) continue;
+    edges.push({
+      id: skill.name, fromNodeId: triggerNode, toNodeId: "approval",
+      label: skill.procedureSteps.join(' -> '),
+      actionSteps: skill.procedureSteps,
+    });
+  }
+  const nodes = [
+    ...Object.keys(CONNECTOR_NODE_LABELS).map(id => ({
+      id, label: CONNECTOR_NODE_LABELS[id], kind: "connector",
+      active: !INACTIVE_NODE_IDS.includes(id),
+    })),
+    { id: "approval", label: "Approval", kind: "approval", active: true },
+  ];
+  window.TakoNodeCanvas.render(document.getElementById('automation-canvas-root'), {
+    nodes, edges,
+    onEdgeDragCreate: (fromNodeId) => openCanvasActionPicker(fromNodeId), // Task 5
+    onEdgeSelect: (edgeId) => openCanvasEdgeDetail(edgeId, edges),        // Task 5
+  });
+}
+
+document.querySelectorAll('[data-view-toggle]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const view = btn.dataset.viewToggle;
+    document.querySelectorAll('[data-view-toggle]').forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
+    document.getElementById('automation-list').hidden = view !== 'list';
+    document.getElementById('automation-canvas').hidden = view !== 'canvas';
+    if (view === 'canvas') loadCanvas();
+  });
+});
+
 /* New automation: templates first, never a blank builder directly. */
 const AB_TRIGGER_OPTIONS=${JSON.stringify(AB_TRIGGER_OPTIONS)};
 const AB_ACTION_OPTIONS=${JSON.stringify(AB_ACTION_OPTIONS)};
+const TRIGGER_NODE_TO_STRING=${JSON.stringify(TRIGGER_NODE_TO_STRING)};
 const AUTOMATION_TEMPLATES=[
   {name:'Summarize new Drive files to Slack', trigger:'New file added to Drive', action1:'Summarize the content', action2:'Post to Slack'},
   {name:'Notify on a new Notion page', trigger:'New page added to Notion', action1:'Draft a notification', action2:'Notify the team channel'},
