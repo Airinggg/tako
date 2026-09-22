@@ -13,6 +13,7 @@ const SAMPLE_OPTS = {
   workingDirectory: "/Users/test/tako",
   stdoutPath: "/Users/test/Library/Logs/tako/demo.log",
   stderrPath: "/Users/test/Library/Logs/tako/demo.log",
+  environmentVariables: { PATH: "/opt/homebrew/bin:/usr/bin:/bin" },
 };
 
 test("renderLaunchAgentPlist produces valid plist XML with the required keys", () => {
@@ -41,4 +42,24 @@ test("renderLaunchAgentPlist sets KeepAlive and RunAtLoad true, for an always-on
   const xml = renderLaunchAgentPlist(SAMPLE_OPTS);
   assert.match(xml, /<key>KeepAlive<\/key>\s*<true\/>/);
   assert.match(xml, /<key>RunAtLoad<\/key>\s*<true\/>/);
+});
+
+test("renderLaunchAgentPlist emits an EnvironmentVariables dict with PATH when provided", () => {
+  const xml = renderLaunchAgentPlist(SAMPLE_OPTS);
+  assert.match(xml, /<key>EnvironmentVariables<\/key>/);
+  assert.match(xml, /<key>PATH<\/key>\s*<string>\/opt\/homebrew\/bin:\/usr\/bin:\/bin<\/string>/);
+});
+
+test("renderLaunchAgentPlist omits EnvironmentVariables and still produces valid plist XML when not provided", () => {
+  const { environmentVariables: _unused, ...optsWithoutEnv } = SAMPLE_OPTS;
+  const xml = renderLaunchAgentPlist(optsWithoutEnv);
+  assert.doesNotMatch(xml, /<key>EnvironmentVariables<\/key>/);
+
+  const tmp = join(tmpdir(), `launch-agent-test-noenv-${Date.now()}.plist`);
+  writeFileSync(tmp, xml);
+  try {
+    execFileSync("plutil", ["-lint", tmp], { encoding: "utf8" });
+  } finally {
+    unlinkSync(tmp);
+  }
 });

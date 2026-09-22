@@ -9,6 +9,7 @@ export type LaunchAgentOptions = {
   workingDirectory: string;
   stdoutPath: string;
   stderrPath: string;
+  environmentVariables?: Record<string, string>;
 };
 
 function escapeXml(value: string): string {
@@ -18,6 +19,18 @@ function escapeXml(value: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
+}
+
+function renderEnvironmentVariables(vars: Record<string, string> | undefined): string {
+  if (!vars || Object.keys(vars).length === 0) return "";
+  const entries = Object.entries(vars)
+    .map(([key, value]) => `    <key>${escapeXml(key)}</key>\n    <string>${escapeXml(value)}</string>`)
+    .join("\n");
+  return `  <key>EnvironmentVariables</key>
+  <dict>
+${entries}
+  </dict>
+`;
 }
 
 export function renderLaunchAgentPlist(opts: LaunchAgentOptions): string {
@@ -34,7 +47,7 @@ export function renderLaunchAgentPlist(opts: LaunchAgentOptions): string {
   </array>
   <key>WorkingDirectory</key>
   <string>${escapeXml(opts.workingDirectory)}</string>
-  <key>KeepAlive</key>
+${renderEnvironmentVariables(opts.environmentVariables)}  <key>KeepAlive</key>
   <true/>
   <key>RunAtLoad</key>
   <true/>

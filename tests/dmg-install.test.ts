@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -29,4 +30,6 @@ test("Install.command execs the orchestration script and is marked executable in
   const src = readFileSync(join(REPO, "Install.command"), "utf8");
   assert.match(src, /^#!/, "Install.command needs a shebang to be double-clickable by Finder");
   assert.match(src, /dmg-install\.ts/);
+  const gitMode = execFileSync("git", ["ls-files", "-s", "Install.command"], { cwd: REPO, encoding: "utf8" });
+  assert.match(gitMode, /^100755/, "Install.command must be executable in the git index");
 });

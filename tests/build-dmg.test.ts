@@ -33,6 +33,12 @@ test("build-dmg.sh produces a .dmg with Install.command but without .git, node_m
 
     const installPerms = execFileSync("ls", ["-l", join(mountPoint, "Install.command")], { encoding: "utf8" });
     assert.match(installPerms, /^-rwx/, "Install.command must be executable on the shipped volume");
+
+    assert.doesNotMatch(rootEntries, /^cowork$/m, "internal cowork/ notes must not ship");
+    assert.doesNotMatch(rootEntries, /^evals$/m, "internal evals/ must not ship");
+    assert.doesNotMatch(rootEntries, /^tests$/m, "internal tests/ must not ship");
+    const docsEntries = execFileSync("ls", ["-A", join(mountPoint, "docs")], { encoding: "utf8" });
+    assert.doesNotMatch(docsEntries, /^superpowers$/m, "internal docs/superpowers/ planning docs must not ship");
   } finally {
     if (mountPoint) execFileSync("hdiutil", ["detach", mountPoint, "-quiet"]);
     rmSync(outDir, { recursive: true, force: true });

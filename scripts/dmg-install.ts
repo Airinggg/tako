@@ -9,7 +9,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { REQUIRED_MODELS } from "../lib/cli/doctor.ts";
 import { determineInstallPass } from "../lib/cli/dmg-provision.ts";
 import { renderLaunchAgentPlist } from "../lib/cli/launch-agent.ts";
@@ -54,7 +54,7 @@ function provisionMachine(): void {
   }
 
   console.log("Starting ollama...");
-  spawnSync("brew", ["services", "start", "ollama"]);
+  run("brew", ["services", "start", "ollama"]);
 
   for (const model of REQUIRED_MODELS) {
     console.log(`Pulling model ${model}...`);
@@ -71,6 +71,9 @@ function provisionMachine(): void {
   console.log("Installing dependencies (npm install)...");
   run("npm", ["install"], { cwd: INSTALL_DIR });
 
+  console.log("Installing packages/brain dependencies...");
+  run("bun", ["install"], { cwd: join(INSTALL_DIR, "packages/brain") });
+
   console.log("Scaffolding config...");
   run("bun", ["bin/omnibrain", "setup"], { cwd: INSTALL_DIR });
 
@@ -83,14 +86,15 @@ Install.command to go live.
 `);
 }
 
-async function waitForServer(url: string, attempts = 20, delayMs = 500): Promise<boolean> {
+async function waitForServer(url: string, attempts = 40, delayMs = 750): Promise<boolean> {
   for (let i = 0; i < attempts; i++) {
     try {
-      await fetch(url, { signal: AbortSignal.timeout(1000) });
-      return true;
+      const res = await fetch(url, { signal: AbortSignal.timeout(1000) });
+      if (res.ok) return true;
     } catch {
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      // not up yet -- fall through to retry
     }
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
   return false;
 }
@@ -106,6 +110,16 @@ async function goLive(): Promise<void> {
   mkdirSync(LOG_DIR, { recursive: true });
 
   const bunPath = spawnSync("which", ["bun"], { encoding: "utf8" }).stdout.trim() || "/opt/homebrew/bin/bun";
+  const pathEntries = [
+    dirname(bunPath),
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+  ];
+  const dedupedPath = [...new Set(pathEntries)].join(":");
   const plist = renderLaunchAgentPlist({
     label: LAUNCH_AGENT_LABEL,
     bunPath,
@@ -113,6 +127,7 @@ async function goLive(): Promise<void> {
     workingDirectory: INSTALL_DIR,
     stdoutPath: LOG_PATH,
     stderrPath: LOG_PATH,
+    environmentVariables: { PATH: dedupedPath },
   });
 
   if (existsSync(LAUNCH_AGENT_PATH)) {
@@ -151,4 +166,7 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+main().catch((err) => {
+  console.error(err.message);
+  process.exitCode = 1;
+});

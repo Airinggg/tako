@@ -18,6 +18,11 @@ git -C "$REPO_ROOT" archive HEAD | tar -x -C "$DEST"
 
 chmod +x "$DEST/Install.command"
 
+# Prune internal-only directories from the STAGED copy (never the real
+# repo) -- planning docs, taskboard notes, evals, and the test suite have
+# no business on a customer's machine.
+rm -rf "$DEST/cowork" "$DEST/docs/superpowers" "$DEST/evals" "$DEST/tests"
+
 mkdir -p "$OUT_DIR"
 OUT_PATH="$OUT_DIR/tako-installer.dmg"
 rm -f "$OUT_PATH"
