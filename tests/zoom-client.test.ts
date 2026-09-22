@@ -28,6 +28,7 @@ test("createZoomMeeting calls the OAuth token endpoint then the meeting-create e
     agenda: "Steps to get a new data source onboarded.\n\nEvidence: notion/onboarding/connector-request",
     startTime: "2026-10-01T09:00:00.000Z",
     durationMinutes: 45,
+    participantEmails: ["a@example.com", "b@example.com"],
   }, { fetchImpl });
 
   assert.deepEqual(result, { id: "987654321", joinUrl: "https://zoom.us/j/987654321", startUrl: "https://zoom.us/s/987654321" });
@@ -46,6 +47,7 @@ test("createZoomMeeting calls the OAuth token endpoint then the meeting-create e
   assert.equal(body.start_time, "2026-10-01T09:00:00.000Z");
   assert.equal(body.duration, 45);
   assert.equal(body.settings.join_before_host, false);
+  assert.deepEqual(body.settings.meeting_invitees, [{ email: "a@example.com" }, { email: "b@example.com" }]);
 });
 
 test("createZoomMeeting throws with status and body on a non-2xx OAuth response", async () => {
@@ -62,7 +64,7 @@ test("createZoomMeeting throws with status and body on a non-2xx meeting-create 
     return new Response("start_time is invalid", { status: 400 });
   }) as typeof fetch;
   await assert.rejects(
-    createZoomMeeting(CREDS, { topic: "x", agenda: "y", startTime: "bad", durationMinutes: 30 }, { fetchImpl }),
+    createZoomMeeting(CREDS, { topic: "x", agenda: "y", startTime: "bad", durationMinutes: 30, participantEmails: [] }, { fetchImpl }),
     /400.*start_time is invalid/s,
   );
 });

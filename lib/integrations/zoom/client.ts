@@ -37,7 +37,7 @@ async function getAccessToken(creds: ZoomCredentials, fetchImpl: typeof fetch): 
  *  caller (scripts/demo.ts's confirmZoomMeeting()) must run first. */
 export async function createZoomMeeting(
   creds: ZoomCredentials,
-  input: { topic: string; agenda: string; startTime: string; durationMinutes: number },
+  input: { topic: string; agenda: string; startTime: string; durationMinutes: number; participantEmails: string[] },
   opts: { fetchImpl?: typeof fetch } = {},
 ): Promise<ZoomMeetingResult> {
   const fetchImpl = opts.fetchImpl ?? fetch;
@@ -51,7 +51,7 @@ export async function createZoomMeeting(
       type: 2,
       start_time: input.startTime,
       duration: input.durationMinutes,
-      settings: { join_before_host: false },
+      settings: { join_before_host: false, meeting_invitees: input.participantEmails.map((email) => ({ email })) },
     }),
   });
   if (!res.ok) throw new Error(`zoom create meeting ${res.status}: ${await res.text()}`);
