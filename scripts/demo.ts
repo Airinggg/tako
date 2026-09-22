@@ -2487,10 +2487,40 @@ function openPermissionsPanel(idx){
     +'<p class="tako-supporting">'+(m.isOwner?'Owner':'Member')+'</p>'
     +'<h3>Connected content</h3>'
     +'<ul>'+((m.read&&m.read.length)?m.read.map(s=>'<li>'+esc(s)+'</li>').join(''):'<li>—</li>')+'</ul>'
-    +'<p class="tako-supporting">This member’s access is read-only.</p>';
+    +'<p class="tako-supporting">This member’s access is read-only.</p>'
+    +'<h3>Agent access</h3>'
+    +'<p class="tako-supporting">Lets this person\'s own AI tool connect directly, scoped to exactly what they can already see here.</p>'
+    +'<button class="tako-btn tako-btn--secondary" id="permissions-issue-agent" data-member-id="'+esc(m.id)+'">Issue agent access</button>'
+    +'<div id="permissions-agent-out"></div>';
   $('#permissions-panel').hidden=false;
 }
 $('#permissions-panel-close')?.addEventListener('click',()=>{$('#permissions-panel').hidden=true;});
+document.addEventListener('click',async e=>{
+  if(e.target?.id!=='permissions-issue-agent')return;
+  const memberId=e.target.dataset.memberId;
+  const out=$('#permissions-agent-out');
+  out.innerHTML='<p class="hint">Issuing…</p>';
+  try{
+    const r=await adminApi('/api/permissions/provision',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({memberId})});
+    out.innerHTML=
+      '<div class="cx-summary" style="margin-top:8px">'
+      +'<p class="hint" style="color:var(--tako-danger,#b00);font-weight:600">⚠ Copy this now — it will not be shown again.</p>'
+      +'<div class="cx-summary-row"><span class="cx-summary-label">Connection URL</span><span class="mono">'+esc(r.mcpUrl)+'</span></div>'
+      +'<div class="cx-summary-row"><span class="cx-summary-label">Client ID</span><span class="mono">'+esc(r.clientId)+'</span></div>'
+      +'<div class="cx-summary-row"><span class="cx-summary-label">CLI</span><span class="mono">'+esc(r.cliCommand)+'</span></div>'
+      +'<button class="tako-btn tako-btn--secondary" data-revoke-client="'+esc(r.clientId)+'" style="margin-top:8px">Revoke</button>'
+      +'</div>';
+  }catch(err){out.innerHTML='<div class="note-err">'+esc(err.message)+'</div>';}
+});
+document.addEventListener('click',async e=>{
+  if(!e.target?.dataset?.revokeClient)return;
+  const clientId=e.target.dataset.revokeClient;
+  const out=$('#permissions-agent-out');
+  try{
+    await adminApi('/api/permissions/revoke-provision',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({clientId})});
+    out.innerHTML='<p class="hint">Revoked.</p>';
+  }catch(err){out.innerHTML='<div class="note-err">'+esc(err.message)+'</div>';}
+});
 $('#cx-credentials-panel-close')?.addEventListener('click',()=>{$('#cx-credentials-panel').hidden=true;});
 async function loadAccess(force){
   if(accessLoaded&&!force)return;accessLoaded=true;

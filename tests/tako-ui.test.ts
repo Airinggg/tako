@@ -62,8 +62,14 @@ test("navigation matches the tako information architecture exactly", () => {
 
 test("no screen exposes internal platform jargon", () => {
   const html = renderPage();
+  // Only what a person actually sees matters here — strip <script> contents
+  // first so internal JS identifiers (e.g. an API response field name like
+  // `mcpUrl`, never rendered as text) don't false-positive this check. The
+  // markup/labels/copy outside <script> tags is exactly what's "exposed" on
+  // the screen, which is what this test's name promises to guard.
+  const visibleHtml = html.replace(/<script[\s\S]*?<\/script>/gi, "");
   for (const forbidden of ["iPaaS", "MCP", "frontmatter", "source slug", "rollup"]) {
-    assert.doesNotMatch(html, new RegExp(forbidden, "i"), `found forbidden term: ${forbidden}`);
+    assert.doesNotMatch(visibleHtml, new RegExp(forbidden, "i"), `found forbidden term: ${forbidden}`);
   }
 });
 
@@ -385,4 +391,9 @@ test("every adapter trigger string is one of the builder's real AB_TRIGGER_OPTIO
     assert.ok(AB_TRIGGER_OPTIONS.includes(str), `"${str}" is not in AB_TRIGGER_OPTIONS`);
   }
   assert.equal(Object.values(TRIGGER_NODE_TO_STRING).length, AB_TRIGGER_OPTIONS.length);
+});
+
+test("Team & Permissions member panel offers Issue agent access", () => {
+  const html = renderPage();
+  assert.match(html, /Issue agent access/);
 });
