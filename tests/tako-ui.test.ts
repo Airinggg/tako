@@ -62,12 +62,14 @@ test("navigation matches the tako information architecture exactly", () => {
 
 test("no screen exposes internal platform jargon", () => {
   const html = renderPage();
-  // Only what a person actually sees matters here — strip <script> contents
-  // first so internal JS identifiers (e.g. an API response field name like
-  // `mcpUrl`, never rendered as text) don't false-positive this check. The
-  // markup/labels/copy outside <script> tags is exactly what's "exposed" on
-  // the screen, which is what this test's name promises to guard.
-  const visibleHtml = html.replace(/<script[\s\S]*?<\/script>/gi, "");
+  // The whole page (including inline <script> UI-rendering code) is checked,
+  // since most of this app's visible copy is built via client-side
+  // `innerHTML =` string concatenation inside <script> tags — stripping
+  // <script> contents would blind this guardrail to that text entirely.
+  // The one narrow, legitimate exception is `mcpUrl`, a JS property/variable
+  // name (an API response field, never rendered as literal text) that
+  // false-positives the "MCP" check without ever being shown to a user.
+  const visibleHtml = html.replace(/\bmcpUrl\b/g, "");
   for (const forbidden of ["iPaaS", "MCP", "frontmatter", "source slug", "rollup"]) {
     assert.doesNotMatch(visibleHtml, new RegExp(forbidden, "i"), `found forbidden term: ${forbidden}`);
   }
