@@ -2,11 +2,12 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { gbrainHome } from "../eval/qa.ts";
 
 export const REPO_ROOT = resolve(import.meta.dir, "../..");
 export const BRAIN_PACKAGE = join(REPO_ROOT, "packages/brain");
 export const BRAIN_CLI = join(BRAIN_PACKAGE, "src/cli.ts");
-export const GBRAIN_HOME = join(process.env.HOME || "", ".aletheia-brain");
+export const GBRAIN_HOME = gbrainHome();
 const SERVE_STATE = join(tmpdir(), `tako-omnibrain-serve-${process.getuid?.() ?? "user"}.json`);
 
 export type ServeProcess = { pid: number; port: number; managed: boolean };
