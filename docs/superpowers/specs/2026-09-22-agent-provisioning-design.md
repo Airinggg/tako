@@ -2,7 +2,10 @@
 
 Status: Draft, awaiting review
 Author: brainstormed with the product owner, 2026-09-22
-Related: `docs/BRAIN_CONNECTORS.md`, `lib/console/data.ts`, `packages/brain/src/cli.ts` (`gbrain auth`, `gbrain serve --http`)
+Related: `docs/BRAIN_CONNECTORS.md`, `lib/console/data.ts`, `scripts/console.ts`
+(existing `invite`/`revoke` — this spec extracts and fixes them, not a
+from-scratch build), `lib/cli/serve-runtime.ts`, `packages/brain/src/cli.ts`
+(`gbrain auth`, `gbrain serve --http`)
 
 ## 0. Objective
 
@@ -12,6 +15,19 @@ real, scoped, revocable endpoint that their own AI agent/tool can connect
 to directly — not just browse tako's own Ask screen. The other three steps
 already exist in tako (connectors, per-member access groups, skill
 extraction); this spec closes the one real gap.
+
+**Important correction found while grounding this spec:** Team &
+Permissions' existing "members" (`lib/console/data.ts:loadMembers`) are
+*already* gbrain OAuth clients — `loadMembers()` reads directly from
+`gbrain auth clients --json` and maps each one's `federated_read` into
+`Member.read`. So a "member" is not a separate tako-owned employee
+record with no credential yet; it already has one. This is exactly why
+provisioning must mint a **second, dedicated, separately-revocable
+client** per person for personal agent use — reusing or rescoping
+whatever client already backs their "member" entry would silently change
+the scope/purpose of a credential that may already be serving something
+else. §2 and §3 already reflect this (a fresh `register-client` call,
+never a `rescope-client` of the member's own existing client id).
 
 ## 1. Non-goals
 
@@ -54,25 +70,35 @@ Two things need to exist for provisioning to mean anything:
    already is via `.env` in this project). This must be fixed as part of
    this feature (Task 1 in the plan) or every provisioned endpoint will
    point at an empty or wrong brain.
-2. **A provisioning layer in `scripts/demo.ts`** that, given a member id,
-   reads their current `Member.read` sources, and runs the real two-step
-   gbrain sequence (verified directly against a running `gbrain` — the
-   brainstorming draft's single `gbrain auth create` command does not
-   exist):
-   ```bash
-   gbrain auth register-client "<member.name>" \
-     --federated-read <member.read.join(",")> \
-     --scopes read --token-endpoint-auth-method none
-   # stdout includes: "Client ID:  gbrain_cl_<hex>"
-   gbrain auth rescope-client "<that client id>" --surface starter
+2. **A provisioning layer — reused, not duplicated.** Second correction:
+   `scripts/console.ts` already has a working `invite()`/`revoke()` pair
+   doing almost exactly this (its own header: "the only brain mutations
+   exposed here are the existing register-client and revoke-client invite
+   actions"). Its `invite()` runs:
+   ```typescript
+   gb(["auth", "register-client", name, "--scopes", "read", "--source", source, "--federated-read", reads.join(",")])
    ```
-   `--surface` is not accepted at registration time — it must be set via
-   a second `rescope-client` call. The registration step's stdout is the
-   only place the client id appears; the provisioning layer must parse it
-   from the `Client ID:` line. `--token-endpoint-auth-method none` yields
-   a public, PKCE-only client (`<public client — none issued>` for the
-   secret) — no secret to leak, matching the "revocable any time, no
-   standing secret to rotate" goal.
+   confirming `register-client` (not `auth create`) is correct — but it
+   has two gaps this feature must close, not re-solve elsewhere:
+   - It never pins `--surface starter` after registration, so an invited
+     client gets whatever surface the server defaults to (`full`, per
+     gbrain's own help text) — every non-goal in §1 about read-only,
+     starter-tier access depends on this being fixed.
+   - It uses the same hardcoded `GBRAIN_HOME` (`~/.aletheia-brain`,
+     ignoring `process.env.GBRAIN_HOME`) as `serve-runtime.ts` — the same
+     bug, in a second file.
+
+   **Resolved architecture:** extract `invite`/`revoke` out of
+   `scripts/console.ts` into a new shared module, `lib/console/provision.ts`
+   (mutations live separately from `lib/console/data.ts`'s read-only
+   helpers, preserving that file's own documented boundary — "nothing
+   here mutates the brain"). The extracted `invite()` gains the missing
+   `rescope-client --surface starter` call and the `GBRAIN_HOME` fix
+   (reading `process.env.GBRAIN_HOME`, matching `lib/console/data.ts`'s
+   already-correct pattern). `scripts/console.ts` is refactored to import
+   from it instead of keeping its own copy (DRY — one implementation, two
+   UIs). `scripts/demo.ts`'s new routes import the same module. No
+   parallel/duplicate provisioning logic exists after this.
 
 Tako stores **no new credential state of its own** — `gbrain auth
 clients --json` is the source of truth for what's issued, to whom, and
@@ -90,10 +116,14 @@ New admin-gated route, `POST /api/permissions/provision`, in
   → if no member.read sources: 400, "this member has no granted access to provision from"
   → findAlethiaServe() (lib/cli/serve-runtime.ts) — if not running, call
     serveGbrain() to start it before proceeding
-  → gbrain auth register-client "<member.name>" --federated-read <member.read.join(",")>
-      --scopes read --token-endpoint-auth-method none
-  → parse "Client ID:  gbrain_cl_..." from stdout
-  → gbrain auth rescope-client <that id> --surface starter
+  → lib/console/provision.ts:invite(personalClientName, member.write, member.read,
+      { surface: "starter", tokenEndpointAuthMethod: "none" })
+    (personalClientName is derived, not admin-typed — e.g. `${member.name}-agent`,
+     so it's visibly distinct from the member's own existing client in
+     `gbrain auth clients` and never collides with it)
+  → invite() internally: register-client (--scopes read, --federated-read,
+    --token-endpoint-auth-method none) then rescope-client --surface starter,
+    returns { clientId, ... }
   → return { clientId, mcpUrl, cliCommand } — shown ONCE in the UI,
     same "reveal once, never re-displayed" pattern already used for the
     one-time admin token at server startup
@@ -113,7 +143,10 @@ from `gbrain auth clients --json`, not tako's own state).
 New admin-gated route, `POST /api/permissions/revoke-provision`:
 
 ```
-{ clientId: string } → gbrain auth revoke-client <clientId>
+{ clientId: string } → lib/console/provision.ts:revoke(clientId)
+  (thin wrapper over gbrain auth revoke-client, same validation
+  scripts/console.ts's revoke() already has: reject anything not
+  matching /^gbrain_cl_[a-f0-9]+$/ before shelling out)
 ```
 
 The member detail panel's "Provisioned agent access" row gets a
