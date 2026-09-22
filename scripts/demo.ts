@@ -2516,9 +2516,9 @@ async function loadSkills(force){
 const CONNECTOR_NODE_LABELS = {
   drive: "Google Drive", notion: "Notion", slack: "Slack",
   schedule: "Every Monday", manual: "Manual",
-  discord: "Discord", notes: "Local Notes", cad: "CAD", mcp: "MCP",
+  discord: "Discord", notes: "Local Notes", cad: "CAD", extend: "Extend",
 };
-const INACTIVE_NODE_IDS = ["discord", "notes", "cad", "mcp"];
+const INACTIVE_NODE_IDS = ["discord", "notes", "cad", "extend"];
 
 function openCanvasActionPicker(fromNodeId) { /* Task 5 */ }
 function openCanvasEdgeDetail(edgeId, edges) { /* Task 5 */ }

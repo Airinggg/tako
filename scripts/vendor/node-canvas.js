@@ -11,7 +11,7 @@
     discord:  { x: 240, y: 380 },
     notes:    { x: 320, y: 380 },
     cad:      { x: 400, y: 380 },
-    mcp:      { x: 480, y: 380 },
+    extend:   { x: 480, y: 380 },
   };
   const NODE_W = 140;
   const NODE_H = 56;
