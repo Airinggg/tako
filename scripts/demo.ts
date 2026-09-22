@@ -29,6 +29,8 @@ import { TAKO_CSS_TOKENS } from "./tako/tokens.ts";
 import { mascotScene, mascotMark } from "./tako/mascot.ts";
 import { answerFromSource, citedSlugs, gb, gbrainHome, usesHostedProvider } from "../lib/eval/qa.ts";
 import { loadDashboard, loadMembers } from "../lib/console/data.ts";
+import { invite, revoke } from "../lib/console/provision.ts";
+import { findAlethiaServe, serveGbrain } from "../lib/cli/serve-runtime.ts";
 import { connectorRunner, isConnectorName } from "../lib/connectors/registry.ts";
 import { parseSkill } from "../lib/skills/parse.ts";
 import { runSkill } from "../lib/skills/run.ts";
@@ -1083,6 +1085,8 @@ const ADMIN_ROUTES = new Set([
   "/api/connectors/test",
   "/api/connectors/sync",
   "/api/ask-provider",
+  "/api/permissions/provision",
+  "/api/permissions/revoke-provision",
 ]);
 
 if (import.meta.main) {
@@ -1232,6 +1236,33 @@ if (import.meta.main) {
           }
           const { name } = await readJsonBody<{ name?: string }>(req);
           return json(await syncConnector(String(name)));
+        }
+
+        if (url.pathname === "/api/permissions/provision" && req.method === "POST") {
+          const { memberId } = await readJsonBody<{ memberId?: string }>(req);
+          const member = loadMembers().find((m) => m.id === memberId);
+          if (!member) return json({ error: "member not found" }, 404);
+          if (!member.read.length) return json({ error: "this member has no granted access to provision from" }, 400);
+          if (!findAlethiaServe()) {
+            try { serveGbrain([]); } catch (err) {
+              return json({ error: `could not start the MCP server: ${(err as Error).message}` }, 500);
+            }
+          }
+          const personalClientName = `${member.name}-agent`.replace(/[^a-z0-9-]/gi, "-").toLowerCase().slice(0, 64);
+          const result = invite(personalClientName, `${member.name}@agent.local`, member.write, member.read);
+          const serving = findAlethiaServe();
+          const mcpUrl = serving ? `http://localhost:${serving.port}` : "";
+          return json({
+            clientId: result.clientId,
+            mcpUrl,
+            cliCommand: `gbrain connect ${mcpUrl} --install`,
+          });
+        }
+
+        if (url.pathname === "/api/permissions/revoke-provision" && req.method === "POST") {
+          const { clientId } = await readJsonBody<{ clientId?: string }>(req);
+          revoke(String(clientId));
+          return json({ ok: true });
         }
 
         return new Response("not found", { status: 404 });
