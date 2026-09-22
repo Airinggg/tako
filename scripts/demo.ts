@@ -43,6 +43,13 @@ import { diffGitStatus, formatSyncLogLines, hashContent, parseGitStatus, type Sy
 import { checkRateLimit, ClientError, clientKey, readJsonBody, requireAdmin, resolveAdminToken, safeErrorResponse } from "../lib/util/http-security.ts";
 import { writePrivateFileAtomic } from "../lib/util/private-file.ts";
 import { TRIGGER_NODE_TO_STRING } from "../lib/connectors/automation-canvas/adapter.ts";
+import { findStaleOrUnresolvedKnowledgeItems } from "../lib/knowledge/queries.ts";
+import { getKnowledgeItem, loadKnowledgeItems } from "../lib/knowledge/store.ts";
+import { createZoomMeeting, resolveZoomCredentials, type ZoomCredentials } from "../lib/integrations/zoom/client.ts";
+import { confirmMeetingProposal, draftMeetingProposal, markMeetingCreated } from "../lib/integrations/zoom/proposal.ts";
+import {
+  DEFAULT_PROPOSAL_STORE_PATH, getMeetingProposal, loadMeetingProposals, upsertMeetingProposal,
+} from "../lib/integrations/zoom/proposal-store.ts";
 
 const REPO = import.meta.dir ? join(import.meta.dir, "..") : process.cwd();
 
@@ -382,6 +389,65 @@ function reviewDecide(input: { id?: string; verdict?: string; by?: string; note?
   reviewsCached.clear();
   overviewCached.clear();
   return { id: updated.id, state: updated.state, decision: latestDecision(updated) };
+}
+
+// ── follow-up Zoom meeting proposals (Automations page) ────────────────────
+const KNOWLEDGE_STORE_PATH = join(REPO, "config/knowledge-items.json");
+const PROPOSAL_STORE_PATH = join(REPO, "config/meeting-proposals.json");
+
+/** Drafts a real follow-up-meeting proposal for a real stale/unresolved
+ *  KnowledgeItem — see docs/superpowers/specs/2026-09-22-zoom-followup-meeting-design.md
+ *  Part 5. Reasons are recomputed server-side; a client can never invent
+ *  why an item was "stale." */
+export function proposeZoomMeeting(
+  input: { knowledgeItemId: string; createdBy: string },
+  opts: { knowledgeStorePath?: string; proposalStorePath?: string; now?: string } = {},
+) {
+  const knowledgeStorePath = opts.knowledgeStorePath ?? KNOWLEDGE_STORE_PATH;
+  const proposalStorePath = opts.proposalStorePath ?? PROPOSAL_STORE_PATH;
+  const item = getKnowledgeItem(input.knowledgeItemId, knowledgeStorePath);
+  if (!item) throw new ClientError(`knowledge item "${input.knowledgeItemId}" not found`);
+  const now = opts.now ?? new Date().toISOString();
+  const [stale] = findStaleOrUnresolvedKnowledgeItems([item], now);
+  if (!stale) throw new ClientError(`knowledge item "${input.knowledgeItemId}" is not stale or unresolved`);
+  const proposal = draftMeetingProposal(item, stale.reasons, { createdBy: input.createdBy, now });
+  upsertMeetingProposal(proposal, proposalStorePath);
+  return proposal;
+}
+
+/** Confirms a proposal's human-supplied details, then makes the one real
+ *  outbound call this feature exists to make — creating the Zoom meeting.
+ *  The proposal is persisted as "confirmed" before the Zoom call, so a
+ *  failed call never loses the human's confirmed details; it can be
+ *  retried by re-POSTing confirm with the same proposalId once the
+ *  underlying problem (e.g. bad credentials) is fixed. */
+export async function confirmZoomMeeting(
+  input: { proposalId: string; proposedStartAt: string; proposedDurationMinutes?: number; participantEmails: string[]; confirmedBy: string },
+  opts: { proposalStorePath?: string; now?: string; zoomCredentials?: ZoomCredentials; fetchImpl?: typeof fetch } = {},
+) {
+  const proposalStorePath = opts.proposalStorePath ?? PROPOSAL_STORE_PATH;
+  const existing = getMeetingProposal(input.proposalId, proposalStorePath);
+  if (!existing) throw new ClientError(`meeting proposal "${input.proposalId}" not found`);
+  const confirmed = confirmMeetingProposal(existing, {
+    proposedStartAt: input.proposedStartAt,
+    proposedDurationMinutes: input.proposedDurationMinutes,
+    participantEmails: input.participantEmails,
+    confirmedBy: input.confirmedBy,
+    now: opts.now,
+  });
+  upsertMeetingProposal(confirmed, proposalStorePath);
+
+  const creds = opts.zoomCredentials ?? resolveZoomCredentials();
+  const zoomMeeting = await createZoomMeeting(creds, {
+    topic: confirmed.topic,
+    agenda: confirmed.agendaText,
+    startTime: confirmed.proposedStartAt!,
+    durationMinutes: confirmed.proposedDurationMinutes,
+  }, { fetchImpl: opts.fetchImpl });
+
+  const created = markMeetingCreated(confirmed, zoomMeeting, opts.now);
+  upsertMeetingProposal(created, proposalStorePath);
+  return created;
 }
 
 // ── connect a service (front-end for config/connectors.json) ───────────────
