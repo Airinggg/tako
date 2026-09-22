@@ -46,3 +46,53 @@ test("draftMeetingProposal builds a draft citing the item's real title/descripti
 test("draftMeetingProposal refuses an empty reasons list", () => {
   assert.throws(() => draftMeetingProposal(knowledgeItem(), [], { createdBy: "Taro", now: NOW }), /reasons/);
 });
+
+import { confirmMeetingProposal, markMeetingCreated } from "../lib/integrations/zoom/proposal.ts";
+
+function draft() {
+  return draftMeetingProposal(knowledgeItem(), ["unresolved_review"], { createdBy: "Taro", now: NOW });
+}
+
+test("confirmMeetingProposal fills in the human-supplied details and moves to confirmed", () => {
+  const confirmed = confirmMeetingProposal(draft(), {
+    proposedStartAt: "2026-10-01T09:00:00.000Z",
+    proposedDurationMinutes: 45,
+    participantEmails: ["grace@example.com", "taro@example.com"],
+    confirmedBy: "Grace",
+    now: "2026-09-24T00:00:00.000Z",
+  });
+  assert.equal(confirmed.status, "confirmed");
+  assert.equal(confirmed.proposedStartAt, "2026-10-01T09:00:00.000Z");
+  assert.equal(confirmed.proposedDurationMinutes, 45);
+  assert.deepEqual(confirmed.participantEmails, ["grace@example.com", "taro@example.com"]);
+  assert.equal(confirmed.confirmedBy, "Grace");
+  assert.equal(confirmed.confirmedAt, "2026-09-24T00:00:00.000Z");
+});
+
+test("confirmMeetingProposal defaults duration to 30 when omitted", () => {
+  const confirmed = confirmMeetingProposal(draft(), {
+    proposedStartAt: "2026-10-01T09:00:00.000Z",
+    participantEmails: [],
+    confirmedBy: "Grace",
+    now: NOW,
+  });
+  assert.equal(confirmed.proposedDurationMinutes, 30);
+});
+
+test("confirmMeetingProposal refuses a non-draft proposal, an invalid date, or a blank confirmedBy", () => {
+  const already = confirmMeetingProposal(draft(), { proposedStartAt: "2026-10-01T09:00:00.000Z", participantEmails: [], confirmedBy: "Grace", now: NOW });
+  assert.throws(() => confirmMeetingProposal(already, { proposedStartAt: "2026-10-01T09:00:00.000Z", participantEmails: [], confirmedBy: "Grace", now: NOW }), /draft/);
+  assert.throws(() => confirmMeetingProposal(draft(), { proposedStartAt: "not-a-date", participantEmails: [], confirmedBy: "Grace", now: NOW }), /proposedStartAt/);
+  assert.throws(() => confirmMeetingProposal(draft(), { proposedStartAt: "2026-10-01T09:00:00.000Z", participantEmails: [], confirmedBy: "", now: NOW }), /confirmedBy/);
+});
+
+test("markMeetingCreated moves confirmed -> created and attaches the real Zoom result", () => {
+  const confirmed = confirmMeetingProposal(draft(), { proposedStartAt: "2026-10-01T09:00:00.000Z", participantEmails: [], confirmedBy: "Grace", now: NOW });
+  const created = markMeetingCreated(confirmed, { id: "123456789", joinUrl: "https://zoom.us/j/123456789", startUrl: "https://zoom.us/s/123456789" }, "2026-09-24T00:01:00.000Z");
+  assert.equal(created.status, "created");
+  assert.deepEqual(created.zoomMeeting, { id: "123456789", joinUrl: "https://zoom.us/j/123456789", startUrl: "https://zoom.us/s/123456789" });
+});
+
+test("markMeetingCreated refuses a proposal that isn't confirmed", () => {
+  assert.throws(() => markMeetingCreated(draft(), { id: "1", joinUrl: "x", startUrl: "y" }, NOW), /confirmed/);
+});

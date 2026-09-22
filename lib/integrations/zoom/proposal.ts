@@ -66,3 +66,48 @@ export function draftMeetingProposal(
     zoomMeeting: null,
   };
 }
+
+/** A human supplies the concrete time/duration/participants and confirms.
+ *  Requires the proposal to still be `draft` (a proposal can only be
+ *  confirmed once), a parseable `proposedStartAt`, and a non-blank
+ *  `confirmedBy` — no meeting detail is guessed. */
+export function confirmMeetingProposal(
+  proposal: MeetingProposal,
+  input: { proposedStartAt: string; proposedDurationMinutes?: number; participantEmails: string[]; confirmedBy: string; now?: string },
+): MeetingProposal {
+  if (proposal.status !== "draft") {
+    throw new Error(`meeting proposal "${proposal.id}" must be "draft" to confirm (current status: "${proposal.status}")`);
+  }
+  if (Number.isNaN(Date.parse(input.proposedStartAt))) {
+    throw new Error(`proposedStartAt "${input.proposedStartAt}" is not a valid date`);
+  }
+  if (input.confirmedBy.trim() === "") {
+    throw new Error("confirmMeetingProposal requires a non-blank confirmedBy");
+  }
+  const now = input.now ?? new Date().toISOString();
+  const next = clone(proposal);
+  next.status = "confirmed";
+  next.proposedStartAt = input.proposedStartAt;
+  next.proposedDurationMinutes = input.proposedDurationMinutes ?? 30;
+  next.participantEmails = [...input.participantEmails];
+  next.confirmedBy = input.confirmedBy;
+  next.confirmedAt = now;
+  return next;
+}
+
+/** The real Zoom API call succeeded (made by lib/integrations/zoom/client.ts,
+ *  outside this pure module) — attach its result and move to `created`.
+ *  Requires the proposal to be `confirmed` first. */
+export function markMeetingCreated(
+  proposal: MeetingProposal,
+  zoomMeeting: { id: string; joinUrl: string; startUrl: string },
+  now = new Date().toISOString(),
+): MeetingProposal {
+  if (proposal.status !== "confirmed") {
+    throw new Error(`meeting proposal "${proposal.id}" must be "confirmed" before it can be marked created (current status: "${proposal.status}")`);
+  }
+  const next = clone(proposal);
+  next.status = "created";
+  next.zoomMeeting = { ...zoomMeeting };
+  return next;
+}
