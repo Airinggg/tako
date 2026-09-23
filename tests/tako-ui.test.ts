@@ -506,3 +506,18 @@ test("activityView surfaces a created Zoom meeting proposal as a success entry, 
     assert.equal(entries.find((e) => e.id === "mtgprop_test_fixture"), undefined);
   });
 });
+
+test("Zoom is wired into Connected Apps as an env-only card, not the fields/Save/Sync form", () => {
+  const src = readFileSync(join(import.meta.dir, "..", "scripts", "demo.ts"), "utf8");
+  assert.match(src, /zoomCredentialsConfigured/);
+  assert.match(src, /name: "zoom".*envOnly: true/s);
+  assert.match(src, /"zoom-credentials\.md"/);
+  assert.match(src, /if\(r\.envOnly\)\{/);
+});
+
+test("the Zoom credentials guide exists and names the three required env vars", () => {
+  const guide = readFileSync(join(import.meta.dir, "..", "docs", "connectors", "zoom-credentials.md"), "utf8");
+  for (const name of ["ZOOM_ACCOUNT_ID", "ZOOM_CLIENT_ID", "ZOOM_CLIENT_SECRET"]) {
+    assert.match(guide, new RegExp(name));
+  }
+});

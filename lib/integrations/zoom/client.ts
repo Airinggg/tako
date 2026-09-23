@@ -18,6 +18,18 @@ export function resolveZoomCredentials(env: Record<string, string | undefined> =
   };
 }
 
+/** Non-throwing presence check for the Connected Apps status badge —
+ *  reuses resolveZoomCredentials() rather than re-checking the three env
+ *  vars separately, so the two can never drift apart on which vars matter. */
+export function zoomCredentialsConfigured(env: Record<string, string | undefined> = process.env): boolean {
+  try {
+    resolveZoomCredentials(env);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export type ZoomMeetingResult = { id: string; joinUrl: string; startUrl: string };
 
 async function getAccessToken(creds: ZoomCredentials, fetchImpl: typeof fetch): Promise<string> {

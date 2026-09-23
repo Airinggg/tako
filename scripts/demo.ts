@@ -45,7 +45,7 @@ import { writePrivateFileAtomic } from "../lib/util/private-file.ts";
 import { TRIGGER_NODE_TO_STRING } from "../lib/connectors/automation-canvas/adapter.ts";
 import { findStaleOrUnresolvedKnowledgeItems } from "../lib/knowledge/queries.ts";
 import { getKnowledgeItem, loadKnowledgeItems } from "../lib/knowledge/store.ts";
-import { createZoomMeeting, resolveZoomCredentials, type ZoomCredentials } from "../lib/integrations/zoom/client.ts";
+import { createZoomMeeting, resolveZoomCredentials, zoomCredentialsConfigured, type ZoomCredentials } from "../lib/integrations/zoom/client.ts";
 import { confirmMeetingProposal, draftMeetingProposal, markMeetingCreated } from "../lib/integrations/zoom/proposal.ts";
 import {
   DEFAULT_PROPOSAL_STORE_PATH, getMeetingProposal, loadMeetingProposals, upsertMeetingProposal,
@@ -635,7 +635,29 @@ function connectorsView() {
       subdir: c.subdir ?? spec.fields.find((f) => f.key === "subdir")?.def ?? "",
       lastSync: src?.last_sync_at ?? null,
       pages: src?.total_pages ?? 0,
+      envOnly: false,
     };
+  });
+  // Zoom is deliberately not a CONNECTOR_SPECS entry: it doesn't ingest data
+  // (no fields, no sync, no config/connectors.json entry) and its
+  // credentials are environment variables only, per
+  // docs/superpowers/specs/2026-09-22-zoom-followup-meeting-design.md Part 3
+  // — never typed into this UI or written to a JSON file. `envOnly: true`
+  // tells the client to render a minimal status-only panel instead of the
+  // normal fields/Save/Sync form.
+  rows.push({
+    name: "zoom", label: "Zoom", help: "Used to create real Zoom meetings from the Automations page's follow-up-meeting flow. Read-only knowledge ingestion is not part of this connector.",
+    category: "会議 / Meetings",
+    credentialsDocUrl: "/docs/connectors/zoom-credentials.md",
+    hasToken: false, tokenLabel: "", tokenPh: "", tokenMasked: "",
+    configured: zoomCredentialsConfigured(),
+    hasIndustrialCatalog: false,
+    note: "Set as environment variables on the machine running tako (ZOOM_ACCOUNT_ID / ZOOM_CLIENT_ID / ZOOM_CLIENT_SECRET) — not entered here.",
+    fields: [],
+    subdir: "",
+    lastSync: null,
+    pages: 0,
+    envOnly: true,
   });
   return { canSave: !READ_ONLY, rows };
 }
@@ -1250,7 +1272,9 @@ if (import.meta.main) {
 
         if (url.pathname.startsWith("/docs/connectors/")) {
           const requested = url.pathname.slice("/docs/connectors/".length);
-          const known = new Set(Object.values(CONNECTOR_SPECS).map((s) => s.credentialsDoc).filter(Boolean));
+          // "zoom-credentials.md" is added explicitly since Zoom isn't a
+          // CONNECTOR_SPECS entry (see connectorsView()'s envOnly row).
+          const known = new Set([...Object.values(CONNECTOR_SPECS).map((s) => s.credentialsDoc).filter(Boolean), "zoom-credentials.md"]);
           if (known.has(requested)) {
             const file = Bun.file(new URL(`../docs/connectors/${requested}`, import.meta.url));
             return new Response(file, { headers: { "content-type": "text/markdown; charset=utf-8" } });
@@ -3088,6 +3112,32 @@ function selectCx(name,openAdvanced){
   $$('.cx-card').forEach(c=>c.setAttribute('aria-expanded',String(c.dataset.name===name)));
   const r=cxState.rows.find(x=>x.name===name);const panel=$('#cx-panel');
   if(!r){panel.hidden=true;return;}
+  if(r.envOnly){
+    // No fields, no Save/Sync/Test, no "Feeds into"/"Last synced" rows --
+    // this connector has none of that (see connectorsView()'s envOnly row).
+    panel.innerHTML='<div class="pnl-head"><h3>'+esc(r.label)+'</h3>'
+      +'<span class="tokm">'+esc(r.category)+'</span></div>'
+      +'<div class="cx-summary">'
+        +'<div class="cx-summary-row"><span class="cx-summary-label">Status</span>'
+          +'<span class="st">'+(r.configured?'<span class="dot-ok"></span>Connected':'<span class="dot-off"></span>Not connected')+'</span></div>'
+      +'</div>'
+      +'<p class="cx-help">'+esc(r.help)+'</p>'
+      +(r.note?'<p class="hint">'+esc(r.note)+'</p>':'')
+      +(r.credentialsDocUrl?'<p class="hint cx-credentials-link"><button class="cx-credentials-btn" type="button" data-doc="'+esc(r.credentialsDocUrl)+'">Where do I get this token? →</button></p>':'');
+    panel.hidden=false;
+    const credsBtn=$('.cx-credentials-btn',panel);
+    if(credsBtn)credsBtn.addEventListener('click',async()=>{
+      const body=$('#cx-credentials-panel-body');
+      body.innerHTML='<p class="hint">Loading…</p>';
+      $('#cx-credentials-panel').hidden=false;
+      try{
+        const res=await fetch(credsBtn.dataset.doc);
+        if(!res.ok)throw new Error('Could not load this guide (HTTP '+res.status+').');
+        body.innerHTML=mdToHtml(await res.text());
+      }catch(e){body.innerHTML='<p class="note-err">'+esc(e.message)+'</p>';}
+    });
+    return;
+  }
   const fields=r.fields.map(f=>
     '<label>'+esc(f.label)+(f.list?' (blank, or comma-separated)':'')
     +'<input data-k="'+esc(f.key)+'"'+(f.num?' type="text" inputmode="numeric"':' type="text"')

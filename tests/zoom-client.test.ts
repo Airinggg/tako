@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createZoomMeeting, resolveZoomCredentials, type ZoomCredentials } from "../lib/integrations/zoom/client.ts";
+import { createZoomMeeting, resolveZoomCredentials, zoomCredentialsConfigured, type ZoomCredentials } from "../lib/integrations/zoom/client.ts";
 
 const CREDS: ZoomCredentials = { accountId: "acct_123", clientId: "client_abc", clientSecret: "secret_xyz" };
 
@@ -11,6 +11,12 @@ test("resolveZoomCredentials reads the three env vars via resolveSecret", () => 
 
 test("resolveZoomCredentials throws a clear error when a var is missing", () => {
   assert.throws(() => resolveZoomCredentials({}), /ZOOM_ACCOUNT_ID/);
+});
+
+test("zoomCredentialsConfigured is true only when all three vars are set", () => {
+  assert.equal(zoomCredentialsConfigured({ ZOOM_ACCOUNT_ID: "a", ZOOM_CLIENT_ID: "b", ZOOM_CLIENT_SECRET: "c" }), true);
+  assert.equal(zoomCredentialsConfigured({ ZOOM_ACCOUNT_ID: "a", ZOOM_CLIENT_ID: "b" }), false);
+  assert.equal(zoomCredentialsConfigured({}), false);
 });
 
 test("createZoomMeeting calls the OAuth token endpoint then the meeting-create endpoint with the exact expected request shape", async () => {
