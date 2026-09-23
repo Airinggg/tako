@@ -22,7 +22,7 @@
  * FORM: Yoom's airy web grammar, rebuilt with Tako content and neutral marks;
  *   no Yoom logo, mascot, wordmark, or marketing copy is reproduced.
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { TAKO_CSS_TOKENS } from "./tako/tokens.ts";
@@ -140,6 +140,11 @@ function overview() {
 type SkillView = {
   name: string; description: string; triggers: string[];
   reads: string[]; steps: number; procedureSteps: string[]; grantedBy: string[];
+  // sourceSubdir/slug: the skill's actual on-disk location (brain-sources/
+  // <sourceSubdir>/skills/<slug>/SKILL.md) — distinct from `name`, which
+  // comes from frontmatter and can differ from the directory name. Removal
+  // needs the real directory, not the display name.
+  sourceSubdir: string; slug: string;
   // Automations-screen fields (Task 6) — each derived from data already read
   // above, never fabricated. See skillsView() for how each is computed.
   trigger: string; actionSummary: string; connectedApps: string[];
@@ -168,7 +173,7 @@ export function readSkillFiles(rootOverride?: string): Omit<SkillView, "grantedB
       const steps = (proc.match(/^\s*\d+\.\s+/gm) ?? []).length;
       const procedureSteps = (proc.match(/^\s*\d+\.\s+.+$/gm) ?? [])
         .map((line) => line.replace(/^\s*\d+\.\s+/, "").trim());
-      out.push({ name: val("name") || d.name, description: val("description"), triggers: list("triggers"), reads: list("reads"), steps, procedureSteps });
+      out.push({ name: val("name") || d.name, description: val("description"), triggers: list("triggers"), reads: list("reads"), steps, procedureSteps, sourceSubdir: src.name, slug: d.name });
     }
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));
@@ -293,6 +298,35 @@ writes_pages: false
   skillsCached.clear();
   overviewCached.clear();
   return { ok: true, slug };
+}
+
+// A safe path segment: no slashes, no "..", no leading dot — the only shapes
+// generateAutomationSlug()/readdirSync's directory names ever actually
+// produce. Rejecting anything else before it ever reaches a filesystem call
+// is the whole defense against a crafted sourceSubdir/slug escaping
+// brain-sources/*/skills/*.
+const SAFE_PATH_SEGMENT = /^[a-z0-9][a-z0-9-]*$/i;
+
+/** Remove an automation by deleting its skill directory. Takes the same
+ *  (sourceSubdir, slug) pair readSkillFiles() exposes per skill — never a
+ *  client-supplied path — and re-validates both are plain identifiers
+ *  before touching the filesystem, then confirms the resolved directory is
+ *  actually a skill (has a SKILL.md) before removing it, so this can never
+ *  be used to delete an arbitrary directory. */
+export function removeAutomation(sourceSubdir: string, slug: string, rootOverride?: string): { ok: true } | { error: string } {
+  if (READ_ONLY) throw new ClientError("この画面は読み取り専用です / this instance is read-only");
+  if (!SAFE_PATH_SEGMENT.test(sourceSubdir) || !SAFE_PATH_SEGMENT.test(slug)) {
+    return { error: "invalid automation reference" };
+  }
+  const root = rootOverride || join(REPO, "brain-sources");
+  const dir = join(root, sourceSubdir, "skills", slug);
+  if (!existsSync(join(dir, "SKILL.md"))) {
+    return { error: "automation not found" };
+  }
+  rmSync(dir, { recursive: true, force: true });
+  skillsCached.clear();
+  overviewCached.clear();
+  return { ok: true };
 }
 
 // ── working memory ─────────────────────────────────────────────────────────
@@ -1076,6 +1110,7 @@ export function renderPage(): string {
 // than repeated per-route below.
 const ADMIN_ROUTES = new Set([
   "/api/automations/create",
+  "/api/automations/remove",
   "/api/activity/retry",
   "/api/review-submit",
   "/api/review-decide",
@@ -1170,6 +1205,13 @@ if (import.meta.main) {
         if (url.pathname === "/api/automations/create" && req.method === "POST") {
           const { trigger, action1, action2 } = await readJsonBody<{ trigger?: string; action1?: string; action2?: string }>(req);
           const result = createAutomation(String(trigger ?? ""), String(action1 ?? ""), String(action2 ?? ""));
+          if ("error" in result) return json(result, 400);
+          return json(result);
+        }
+
+        if (url.pathname === "/api/automations/remove" && req.method === "POST") {
+          const { sourceSubdir, slug } = await readJsonBody<{ sourceSubdir?: string; slug?: string }>(req);
+          const result = removeAutomation(String(sourceSubdir ?? ""), String(slug ?? ""));
           if ("error" in result) return json(result, 400);
           return json(result);
         }
@@ -1763,6 +1805,8 @@ body { font-family: var(--tako-font); font-size: var(--tako-body); color: var(--
 .tako-btn--primary:hover { background: #1f4f40; }
 .tako-btn--secondary { background: var(--tako-surface); color: var(--tako-text); border-color: var(--tako-border); }
 .tako-btn--secondary:hover { background: var(--tako-canvas); }
+.tako-btn--danger { background: var(--tako-surface); color: var(--tako-error); border-color: var(--tako-error); }
+.tako-btn--danger:hover { background: #F4E1DF; }
 
 /* Cards, generically reused by stats, app tiles, list rows */
 .tako-card { background: var(--tako-surface); border: 1px solid var(--tako-border); border-radius: var(--tako-radius-card); padding: var(--tako-space-3); }
@@ -1782,6 +1826,9 @@ body { font-family: var(--tako-font); font-size: var(--tako-body); color: var(--
 .tako-automation-list { list-style: none; margin: 0 0 var(--tako-space-4); padding: 0; display: flex; flex-direction: column; gap: var(--tako-space-2); }
 .tako-automation-list li { background: var(--tako-surface); border: 1px solid var(--tako-border); border-radius: var(--tako-radius-card); padding: var(--tako-space-3); }
 .tako-automation-sentence { font-size: var(--tako-body); font-weight: 600; margin: 0 0 var(--tako-space-1); }
+.tako-automation-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--tako-space-3); }
+.tako-automation-header .tako-automation-sentence { flex: 1; }
+.tako-automation-header .tako-btn { padding: 6px 14px; font-size: var(--tako-supporting); flex-shrink: 0; }
 .tako-automation-meta { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: var(--tako-supporting); color: var(--tako-text-secondary); margin: 0 0 var(--tako-space-1); }
 .tako-automation-meta b { color: var(--tako-text); font-weight: 600; }
 .tako-automation-apps { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -2304,6 +2351,21 @@ $$('.tako-nav-item').forEach(t=>t.addEventListener('click',()=>goto(t.dataset.na
 $('[data-action="open-ask"]')?.addEventListener('click',()=>{goto('ask');$('#ask-q')?.focus();});
 $('[data-action="create-automation"]')?.addEventListener('click',()=>goto('automations'));
 
+/* automations: remove — delegated on the list container since loadSkills()
+   replaces its innerHTML on every load, which would drop a per-button listener */
+$('#automation-list')?.addEventListener('click',async(e)=>{
+  const btn=e.target.closest('[data-action="remove-automation"]');
+  if(!btn)return;
+  btn.disabled=true;
+  try{
+    await adminApi('/api/automations/remove',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sourceSubdir:btn.dataset.sourceSubdir,slug:btn.dataset.slug})});
+    await loadSkills(true);
+  }catch(err){
+    btn.disabled=false;
+    alert(err.message||'could not remove this automation');
+  }
+});
+
 /* citation chip -> source drawer */
 function citeChip(slug,source){
   return '<span class="cite" data-slug="'+esc(slug)+'" data-source="'+esc(source)+'">'+esc(slug)+'</span>';
@@ -2503,7 +2565,10 @@ async function loadSkills(force){
     $('#automation-list').hidden=false;
     $('#automation-list').innerHTML=sk.map(s=>
       '<li class="tako-automation-card">'
-      +'<p class="tako-automation-sentence">'+sentenceFor(s)+'.</p>'
+      +'<div class="tako-automation-header">'
+        +'<p class="tako-automation-sentence">'+sentenceFor(s)+'.</p>'
+        +'<button class="tako-btn tako-btn--danger" data-action="remove-automation" data-source-subdir="'+esc(s.sourceSubdir)+'" data-slug="'+esc(s.slug)+'">Remove</button>'
+      +'</div>'
       +'<div class="tako-automation-meta">'
         +'<span>'+statusPill(s)+'</span>'
         +'<span><b>Last run</b> '+(s.lastRun?fmtAgo(s.lastRun):'Not yet run')+'</span>'
