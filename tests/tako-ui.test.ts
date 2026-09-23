@@ -3,7 +3,7 @@ import test from "node:test";
 import { existsSync, readFileSync, unlinkSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { NAV_GROUPS, activityView, renderActivityList, renderPage, readSkillFiles, AB_TRIGGER_OPTIONS } from "../scripts/demo.ts";
+import { NAV_GROUPS, activityView, renderActivityList, renderPage, readSkillFiles, removeAutomation, AB_TRIGGER_OPTIONS } from "../scripts/demo.ts";
 import { TAKO_COLORS, TAKO_CSS_TOKENS } from "../scripts/tako/tokens.ts";
 import { TRIGGER_NODE_TO_STRING } from "../lib/connectors/automation-canvas/adapter.ts";
 
@@ -374,6 +374,56 @@ test("readSkillFiles exposes verbatim procedure step text, not just a count", ()
     assert.ok(skill);
     assert.deepEqual(skill!.procedureSteps, ["Summarize the content", "Post to Slack"]);
     assert.equal(skill!.steps, 2); // existing count field must still agree
+    assert.equal(skill!.sourceSubdir, "test-source");
+    assert.equal(skill!.slug, skillName);
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("removeAutomation deletes the skill's directory and it no longer appears in readSkillFiles", () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), "tako-skill-remove-test-"));
+  try {
+    const skillName = "removable-skill";
+    createSkillFixture(tempRoot, skillName, ["Summarize the content"]);
+    assert.ok(readSkillFiles(tempRoot).some((s) => s.name === skillName), "fixture should exist before removal");
+
+    const result = removeAutomation("test-source", skillName, tempRoot);
+    assert.deepEqual(result, { ok: true });
+    assert.ok(!readSkillFiles(tempRoot).some((s) => s.name === skillName), "skill should be gone after removal");
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("removeAutomation returns an error, not a throw, for an automation that doesn't exist", () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), "tako-skill-remove-test-"));
+  try {
+    const result = removeAutomation("test-source", "never-existed", tempRoot);
+    assert.deepEqual(result, { error: "automation not found" });
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("removeAutomation rejects a path-traversal-shaped sourceSubdir or slug without touching the filesystem", () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), "tako-skill-remove-test-"));
+  try {
+    const skillName = "protected-skill";
+    createSkillFixture(tempRoot, skillName, ["Summarize the content"]);
+
+    for (const [sourceSubdir, slug] of [
+      ["../test-source", skillName],
+      ["test-source", "../../etc"],
+      ["test-source/../../etc", skillName],
+      ["", skillName],
+      ["test-source", ""],
+    ] as const) {
+      const result = removeAutomation(sourceSubdir, slug, tempRoot);
+      assert.deepEqual(result, { error: "invalid automation reference" }, `expected rejection for (${sourceSubdir}, ${slug})`);
+    }
+    // the legitimate fixture must be untouched by any of the attempts above
+    assert.ok(readSkillFiles(tempRoot).some((s) => s.name === skillName));
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -385,4 +435,19 @@ test("every adapter trigger string is one of the builder's real AB_TRIGGER_OPTIO
     assert.ok(AB_TRIGGER_OPTIONS.includes(str), `"${str}" is not in AB_TRIGGER_OPTIONS`);
   }
   assert.equal(Object.values(TRIGGER_NODE_TO_STRING).length, AB_TRIGGER_OPTIONS.length);
+});
+
+test("the automations/remove route is registered and admin-gated, same as automations/create", () => {
+  const src = readFileSync(join(import.meta.dir, "..", "scripts", "demo.ts"), "utf8");
+  const adminRoutesBlock = src.slice(src.indexOf("const ADMIN_ROUTES"), src.indexOf("]);", src.indexOf("const ADMIN_ROUTES")));
+  assert.match(adminRoutesBlock, /\/api\/automations\/remove/);
+  assert.match(src, /url\.pathname === "\/api\/automations\/remove" && req\.method === "POST"/);
+});
+
+test("the Automations screen renders a Remove button wired to sourceSubdir/slug", () => {
+  const html = renderPage();
+  assert.match(html, /data-action="remove-automation"/);
+  const src = readFileSync(join(import.meta.dir, "..", "scripts", "demo.ts"), "utf8");
+  assert.match(src, /data-source-subdir=.*s\.sourceSubdir/);
+  assert.match(src, /data-slug=.*s\.slug/);
 });
