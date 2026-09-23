@@ -43,6 +43,13 @@ import { diffGitStatus, formatSyncLogLines, hashContent, parseGitStatus, type Sy
 import { checkRateLimit, ClientError, clientKey, readJsonBody, requireAdmin, resolveAdminToken, safeErrorResponse } from "../lib/util/http-security.ts";
 import { writePrivateFileAtomic } from "../lib/util/private-file.ts";
 import { TRIGGER_NODE_TO_STRING } from "../lib/connectors/automation-canvas/adapter.ts";
+import { findStaleOrUnresolvedKnowledgeItems } from "../lib/knowledge/queries.ts";
+import { getKnowledgeItem, loadKnowledgeItems } from "../lib/knowledge/store.ts";
+import { createZoomMeeting, resolveZoomCredentials, type ZoomCredentials } from "../lib/integrations/zoom/client.ts";
+import { confirmMeetingProposal, draftMeetingProposal, markMeetingCreated } from "../lib/integrations/zoom/proposal.ts";
+import {
+  DEFAULT_PROPOSAL_STORE_PATH, getMeetingProposal, loadMeetingProposals, upsertMeetingProposal,
+} from "../lib/integrations/zoom/proposal-store.ts";
 
 const REPO = import.meta.dir ? join(import.meta.dir, "..") : process.cwd();
 
@@ -416,6 +423,81 @@ function reviewDecide(input: { id?: string; verdict?: string; by?: string; note?
   reviewsCached.clear();
   overviewCached.clear();
   return { id: updated.id, state: updated.state, decision: latestDecision(updated) };
+}
+
+// ── follow-up Zoom meeting proposals (Automations page) ────────────────────
+const KNOWLEDGE_STORE_PATH = join(REPO, "config/knowledge-items.json");
+const PROPOSAL_STORE_PATH = join(REPO, "config/meeting-proposals.json");
+
+/** Drafts a real follow-up-meeting proposal for a real stale/unresolved
+ *  KnowledgeItem — see docs/superpowers/specs/2026-09-22-zoom-followup-meeting-design.md
+ *  Part 5. Reasons are recomputed server-side; a client can never invent
+ *  why an item was "stale." */
+export function proposeZoomMeeting(
+  input: { knowledgeItemId: string; createdBy: string },
+  opts: { knowledgeStorePath?: string; proposalStorePath?: string; now?: string } = {},
+) {
+  if (READ_ONLY) throw new ClientError("この画面は読み取り専用です / this instance is read-only");
+  const knowledgeStorePath = opts.knowledgeStorePath ?? KNOWLEDGE_STORE_PATH;
+  const proposalStorePath = opts.proposalStorePath ?? PROPOSAL_STORE_PATH;
+  const item = getKnowledgeItem(input.knowledgeItemId, knowledgeStorePath);
+  if (!item) throw new ClientError(`knowledge item "${input.knowledgeItemId}" not found`);
+  const now = opts.now ?? new Date().toISOString();
+  const [stale] = findStaleOrUnresolvedKnowledgeItems([item], now);
+  if (!stale) throw new ClientError(`knowledge item "${input.knowledgeItemId}" is not stale or unresolved`);
+  const proposal = draftMeetingProposal(item, stale.reasons, { createdBy: input.createdBy, now });
+  upsertMeetingProposal(proposal, proposalStorePath);
+  return proposal;
+}
+
+/** Confirms a proposal's human-supplied details, then makes the one real
+ *  outbound call this feature exists to make — creating the Zoom meeting.
+ *  The proposal is persisted as "confirmed" before the Zoom call, so a
+ *  failed call never loses the human's confirmed details; it can be
+ *  retried by re-POSTing confirm with the same proposalId once the
+ *  underlying problem (e.g. bad credentials) is fixed — confirmMeetingProposal()
+ *  accepts a proposal that is already "confirmed" (not just "draft") for
+ *  exactly this reason. */
+export async function confirmZoomMeeting(
+  input: { proposalId: string; proposedStartAt: string; proposedDurationMinutes?: number; participantEmails: string[]; confirmedBy: string },
+  opts: { proposalStorePath?: string; now?: string; zoomCredentials?: ZoomCredentials; fetchImpl?: typeof fetch } = {},
+) {
+  if (READ_ONLY) throw new ClientError("この画面は読み取り専用です / this instance is read-only");
+  const proposalStorePath = opts.proposalStorePath ?? PROPOSAL_STORE_PATH;
+  const existing = getMeetingProposal(input.proposalId, proposalStorePath);
+  if (!existing) throw new ClientError(`meeting proposal "${input.proposalId}" not found`);
+  const confirmed = confirmMeetingProposal(existing, {
+    proposedStartAt: input.proposedStartAt,
+    proposedDurationMinutes: input.proposedDurationMinutes,
+    participantEmails: input.participantEmails,
+    confirmedBy: input.confirmedBy,
+    now: opts.now,
+  });
+  upsertMeetingProposal(confirmed, proposalStorePath);
+
+  let zoomMeeting;
+  try {
+    const creds = opts.zoomCredentials ?? resolveZoomCredentials();
+    zoomMeeting = await createZoomMeeting(creds, {
+      topic: confirmed.topic,
+      agenda: confirmed.agendaText,
+      startTime: confirmed.proposedStartAt!,
+      durationMinutes: confirmed.proposedDurationMinutes,
+      participantEmails: confirmed.participantEmails,
+    }, { fetchImpl: opts.fetchImpl });
+  } catch (err) {
+    if (err instanceof ClientError) throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    const match = message.match(/^zoom (?:oauth|create meeting) (\d+):/);
+    if (match) {
+      throw new ClientError(`Zoom API request failed (status ${match[1]}) — check ZOOM_ACCOUNT_ID/ZOOM_CLIENT_ID/ZOOM_CLIENT_SECRET and try again`);
+    }
+    throw new ClientError(message);
+  }
+
+  const created = markMeetingCreated(confirmed, zoomMeeting, opts.now);
+  upsertMeetingProposal(created, proposalStorePath);
+  return created;
 }
 
 // ── connect a service (front-end for config/connectors.json) ───────────────
@@ -995,6 +1077,25 @@ export function activityView(): { entries: ActivityEntry[] } {
     });
   }
 
+  // Source 3: every real Zoom meeting actually created via a follow-up
+  // proposal. A "draft" or "confirmed" (not yet created) proposal
+  // contributes nothing here — an unconfirmed or failed-to-create meeting
+  // never happened, so it must not appear to have.
+  for (const p of loadMeetingProposals(PROPOSAL_STORE_PATH)) {
+    if (p.status !== "created") continue;
+    entries.push({
+      id: p.id,
+      time: p.confirmedAt,
+      label: `Zoom meeting created: ${p.topic}`,
+      initiator: p.confirmedBy ?? "—",
+      sources: p.evidence.map((e) => e.pageSlug),
+      outcome: "success",
+      outcomeLabel: "Success",
+      duration: "—",
+      needsRetry: false,
+    });
+  }
+
   entries.sort((a, b) => new Date(b.time ?? 0).getTime() - new Date(a.time ?? 0).getTime());
   return { entries };
 }
@@ -1118,6 +1219,8 @@ const ADMIN_ROUTES = new Set([
   "/api/connectors/test",
   "/api/connectors/sync",
   "/api/ask-provider",
+  "/api/automations/zoom-meeting/propose",
+  "/api/automations/zoom-meeting/confirm",
 ]);
 
 if (import.meta.main) {
@@ -1252,6 +1355,43 @@ if (import.meta.main) {
 
         if (url.pathname === "/api/review-decide" && req.method === "POST") {
           return json(reviewDecide(await readJsonBody<Record<string, string>>(req)));
+        }
+
+        if (url.pathname === "/api/knowledge/stale" && req.method === "GET") {
+          const items = loadKnowledgeItems(KNOWLEDGE_STORE_PATH);
+          return json({ items: findStaleOrUnresolvedKnowledgeItems(items, new Date().toISOString()) });
+        }
+        if (url.pathname === "/api/automations/zoom-meeting/proposals" && req.method === "GET") {
+          // Public, non-admin-gated route — never return zoomMeeting.startUrl
+          // here (it lets anyone holding it start the meeting as host). The
+          // admin-gated confirm response is fine to return in full.
+          const proposals = loadMeetingProposals(PROPOSAL_STORE_PATH).map((p) =>
+            p.zoomMeeting ? { ...p, zoomMeeting: { id: p.zoomMeeting.id, joinUrl: p.zoomMeeting.joinUrl } } : p
+          );
+          return json({ proposals });
+        }
+        if (url.pathname === "/api/automations/zoom-meeting/propose" && req.method === "POST") {
+          try {
+            const body = await readJsonBody(req);
+            return json(proposeZoomMeeting({ knowledgeItemId: String(body.knowledgeItemId ?? ""), createdBy: String(body.createdBy ?? "") }));
+          } catch (err) {
+            return safeErrorResponse(err, json);
+          }
+        }
+        if (url.pathname === "/api/automations/zoom-meeting/confirm" && req.method === "POST") {
+          try {
+            const body = await readJsonBody(req);
+            const result = await confirmZoomMeeting({
+              proposalId: String(body.proposalId ?? ""),
+              proposedStartAt: String(body.proposedStartAt ?? ""),
+              proposedDurationMinutes: body.proposedDurationMinutes ? Number(body.proposedDurationMinutes) : undefined,
+              participantEmails: Array.isArray(body.participantEmails) ? body.participantEmails.map(String) : [],
+              confirmedBy: String(body.confirmedBy ?? ""),
+            });
+            return json(result);
+          } catch (err) {
+            return safeErrorResponse(err, json);
+          }
         }
 
         if (url.pathname === "/api/connectors") {
@@ -1839,6 +1979,7 @@ body { font-family: var(--tako-font); font-size: var(--tako-body); color: var(--
 .tako-automation-templates, .tako-automation-builder { background: var(--tako-surface); border: 1px solid var(--tako-border); border-radius: var(--tako-radius-card); padding: var(--tako-space-4); display: flex; flex-direction: column; gap: var(--tako-space-3); margin-bottom: var(--tako-space-4); }
 .tako-automation-templates[hidden], .tako-automation-builder[hidden] { display: none; }
 .tako-automation-canvas { position: relative; height: 460px; border: 1px solid var(--tako-border); border-radius: var(--tako-radius-card); }
+.tako-followup-draft-inline { border: 1px solid var(--tako-border); border-radius: var(--tako-radius-card); background: var(--tako-surface); padding: var(--tako-space-4); margin-top: var(--tako-space-3); }
 .tako-canvas-root { position: relative; width: 100%; height: 100%; overflow: hidden; }
 .tako-canvas-node { position: absolute; display: flex; align-items: center; justify-content: center; text-align: center; padding: 8px; border: 1px solid var(--tako-border); border-radius: var(--tako-radius-card); background: var(--tako-surface); cursor: grab; font-size: 13px; }
 .tako-canvas-node--approval { background: var(--tako-accent, #2f5f4f); color: #fff; cursor: default; }
@@ -2083,6 +2224,22 @@ body { font-family: var(--tako-font); font-size: var(--tako-body); color: var(--
         <p>Automation created</p>
         <p class="tako-supporting">It will run the next time its trigger happens.</p>
       </div>
+
+      <section class="tako-followup-meetings" id="followup-meetings-section">
+        <h2>Follow-up meeting suggestions</h2>
+        <p class="hint">Real knowledge items that are overdue for review, stuck awaiting a decision, or have no owner.</p>
+        <ul id="followup-meeting-list"><li class="tako-skeleton tako-skeleton-row" aria-hidden="true"></li></ul>
+        <div class="tako-followup-draft-inline" id="followup-meeting-draft-panel" hidden>
+          <h3 id="followup-draft-topic"></h3>
+          <pre id="followup-draft-agenda"></pre>
+          <label>Start time <input type="datetime-local" id="followup-start-time"></label>
+          <label>Duration (minutes) <input type="number" id="followup-duration" value="30"></label>
+          <label>Participant emails (comma-separated) <input type="text" id="followup-participants"></label>
+          <div class="note-err" id="followup-draft-error" hidden></div>
+          <button class="tako-btn tako-btn--primary" data-action="confirm-zoom-meeting">Create Zoom Meeting</button>
+        </div>
+        <div id="followup-meeting-result" hidden></div>
+      </section>
     </section>
 
     <section class="section" data-name="tasks">
@@ -2338,7 +2495,7 @@ function goto(name){
   $$('.tako-nav-item').forEach(t=>t.setAttribute('aria-current',String(t.dataset.name===name)));
   $$('.section').forEach(s=>s.dataset.name===name?s.setAttribute('data-active',''):s.removeAttribute('data-active'));
   if(name==='permissions')loadAccess();
-  if(name==='automations')loadSkills();
+  if(name==='automations'){loadSkills();loadFollowupMeetings();}
   if(name==='tasks')loadMemory();
   if(name==='approvals')loadReview();
   if(name==='connect')loadConnect();
@@ -2587,6 +2744,79 @@ async function loadSkills(force){
     $('#automation-list').innerHTML='<li>'+retryMarkup(e.message,'skills')+'</li>';
   }
 }
+
+/* Follow-up meeting suggestions (real stale/unresolved KnowledgeItems -> a
+   drafted, then human-confirmed, real Zoom meeting). See
+   docs/superpowers/specs/2026-09-22-zoom-followup-meeting-design.md Part 5. */
+let followupItemsLoaded=false;
+async function loadFollowupMeetings(force){
+  if(followupItemsLoaded&&!force)return;followupItemsLoaded=true;
+  $('#followup-meeting-list').innerHTML='<li class="tako-skeleton tako-skeleton-row"></li>';
+  try{
+    const d=await api('/api/knowledge/stale');
+    const items=(d.items||[]);
+    if(!items.length){
+      $('#followup-meeting-list').innerHTML='<li class="hint">Nothing needs a follow-up meeting right now.</li>';
+      return;
+    }
+    $('#followup-meeting-list').innerHTML=items.map(({item,reasons})=>
+      '<li class="tako-automation-card">'
+      +'<p class="tako-automation-sentence">'+esc(item.title)+'</p>'
+      +'<div class="tako-automation-meta"><span><b>Why</b> '+esc((reasons||[]).join(', '))+'</span></div>'
+      +'<button class="tako-btn tako-btn--secondary" data-propose-item="'+esc(item.id)+'">Propose follow-up meeting</button>'
+      +'</li>').join('');
+    $$('#followup-meeting-list [data-propose-item]').forEach(b=>b.addEventListener('click',()=>proposeFollowupMeeting(b.dataset.proposeItem)));
+  }catch(e){
+    $('#followup-meeting-list').innerHTML='<li>'+retryMarkup(e.message,'followup-meetings')+'</li>';
+  }
+}
+let currentFollowupProposal=null;
+async function proposeFollowupMeeting(knowledgeItemId){
+  try{
+    const proposal=await adminApi('/api/automations/zoom-meeting/propose',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({knowledgeItemId,createdBy:'Automations screen'})});
+    currentFollowupProposal=proposal;
+    $('#followup-draft-topic').textContent=proposal.topic;
+    $('#followup-draft-agenda').textContent=proposal.agendaText;
+    $('#followup-start-time').value='';
+    $('#followup-duration').value=String(proposal.proposedDurationMinutes||30);
+    $('#followup-participants').value='';
+    $('#followup-draft-error').hidden=true;
+    $('#followup-meeting-result').hidden=true;
+    $('#followup-meeting-draft-panel').hidden=false;
+  }catch(e){
+    $('#followup-meeting-list').innerHTML='<li>'+retryMarkup(e.message,'followup-meetings')+'</li>';
+  }
+}
+$('[data-action="confirm-zoom-meeting"]')?.addEventListener('click',async()=>{
+  const errBox=$('#followup-draft-error');
+  errBox.hidden=true;
+  if(!currentFollowupProposal){errBox.textContent='No proposal selected.';errBox.hidden=false;return;}
+  const startTimeLocal=$('#followup-start-time').value;
+  if(!startTimeLocal){errBox.textContent='Start time is required.';errBox.hidden=false;return;}
+  const proposedStartAt=new Date(startTimeLocal).toISOString();
+  const proposedDurationMinutes=Number($('#followup-duration').value)||30;
+  const participantEmails=$('#followup-participants').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const btn=$('[data-action="confirm-zoom-meeting"]');
+  btn.disabled=true;
+  const orig=btn.textContent;
+  btn.textContent='Creating…';
+  try{
+    const result=await adminApi('/api/automations/zoom-meeting/confirm',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+      proposalId:currentFollowupProposal.id,proposedStartAt,proposedDurationMinutes,participantEmails,confirmedBy:'Automations screen',
+    })});
+    $('#followup-meeting-draft-panel').hidden=true;
+    $('#followup-meeting-result').hidden=false;
+    $('#followup-meeting-result').innerHTML='<p>Zoom meeting created — <a href="'+esc(result.zoomMeeting.joinUrl)+'" target="_blank" rel="noopener">'+esc(result.zoomMeeting.joinUrl)+'</a></p>';
+    currentFollowupProposal=null;
+    await loadFollowupMeetings(true);
+  }catch(e){
+    errBox.textContent=e.message;
+    errBox.hidden=false;
+  }finally{
+    btn.disabled=false;
+    btn.textContent=orig;
+  }
+});
 
 const CONNECTOR_NODE_LABELS = {
   drive: "Google Drive", notion: "Notion", slack: "Slack",
@@ -3161,6 +3391,7 @@ const RETRY_FNS={
   review:()=>loadReview(true),
   activity:()=>loadActivity(true),
   connect:()=>loadConnect(true),
+  "followup-meetings":()=>loadFollowupMeetings(true),
 };
 document.addEventListener('click',e=>{
   const btn=e.target.closest && e.target.closest('[data-retry]');
