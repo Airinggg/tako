@@ -52,6 +52,12 @@ Tako never sends or publishes anything on its own.
 - Settings and Help are real, live screens now (model/provider state, brain
   location, connected-source counts, a quick app tour, and the credential
   guides), not placeholders.
+- Core app portability: real macOS-only bugs (`HOME` env var assumptions,
+  a Unix-only process-detection fallback) are fixed so the app should run
+  on Windows too — but this has not yet been verified end-to-end on a real
+  Windows machine. There is no Windows installer yet (macOS has a `.dmg`;
+  see `docs/DMG_DISTRIBUTION.md`) — Windows setup today is manual (see
+  "Run it locally" above).
 - The evaluation has run on synthetic data only so far. Running it on Lirem's
   real data is the thesis milestone still ahead.
 - Designed but not yet built: a **Digest** feature (proactive "what
@@ -59,22 +65,65 @@ Tako never sends or publishes anything on its own.
   — see `docs/superpowers/specs/2026-09-22-company-brain-digest-design.md`
   and its implementation plan in `docs/superpowers/plans/`.
 
-## Run it locally (macOS)
+## Run it locally
 
-Prerequisites:
+Prerequisites (same on every platform):
 
 - [Bun](https://bun.sh) 1.3+
 - [Ollama](https://ollama.com), with `bge-m3`, `qwen2.5:3b-instruct` pulled
   (`ollama pull bge-m3`, etc.)
 
+### macOS / Linux
+
 ```bash
 npm install
+cd packages/brain && bun install && cd ../..
+bun bin/omnibrain setup   # scaffolds config/*.json
 bun scripts/demo.ts
 ```
 
-Opens at `http://localhost:4400`. Without any connectors configured, most
-screens will be empty — see `cowork/HANDOFF.md` and `docs/BRAIN_CONNECTORS.md`
-for how to connect a source.
+### Windows
+
+Windows support covers running the app itself — there is no installer for
+Windows yet (macOS has a `.dmg`; see `docs/DMG_DISTRIBUTION.md`).
+
+```powershell
+# 1. Install Bun
+powershell -c "irm bun.sh/install.ps1 | iex"
+
+# 2. Install Ollama for Windows: https://ollama.com/download/windows
+#    (its own installer — there's no one-line command for Windows)
+ollama pull bge-m3
+ollama pull qwen2.5:3b-instruct
+
+# 3. Clone and check out this branch
+git clone https://github.com/Airinggg/tako.git
+cd tako
+git checkout feature/connector-credentials-and-categorization
+
+# 4. Install dependencies (two separate installs, matching the app's structure)
+npm install
+cd packages/brain
+bun install
+cd ../..
+
+# 5. Scaffold config -- always invoke via "bun bin/omnibrain", never
+#    "./bin/omnibrain": Windows has no shebang/execute-bit support
+bun bin/omnibrain setup
+
+# 6. Fill in config/connectors.json with real credentials, then check readiness
+bun bin/omnibrain doctor
+
+# 7. Run it
+bun scripts/demo.ts
+```
+
+The repo is private — cloning will prompt you to sign in with a GitHub
+account that has access if this machine hasn't authenticated before.
+
+Both platforms open at `http://localhost:4400`. Without any connectors
+configured, most screens will be empty — see `cowork/HANDOFF.md` and
+`docs/BRAIN_CONNECTORS.md` for how to connect a source.
 
 ## Architecture at a glance
 
