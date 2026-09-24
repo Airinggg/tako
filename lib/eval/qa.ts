@@ -4,6 +4,7 @@
  * answer synthesis on local Ollama. Nothing leaves the machine.
  */
 import { spawnSync } from "node:child_process";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { categorizeText, type Department } from "../govern/categorize.ts";
 import { ClientError } from "../util/http-security.ts";
@@ -21,7 +22,10 @@ export type QaResult = {
 };
 
 export function gbrainHome(): string {
-  return process.env.GBRAIN_HOME || join(process.env.HOME || "", ".aletheia-brain");
+  // homedir() (not process.env.HOME) so this resolves correctly on Windows
+  // too, where HOME isn't set by default -- USERPROFILE is what's actually
+  // set there, and homedir() already knows to check it.
+  return process.env.GBRAIN_HOME || join(homedir(), ".aletheia-brain");
 }
 
 export function gb(args: string[], home = gbrainHome()): string {

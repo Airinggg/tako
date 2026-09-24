@@ -1,11 +1,39 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { asksForLatest, buildAnswerPrompt, extractPageDate, geminiAnswer, usesHostedProvider } from "../lib/eval/qa.ts";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { asksForLatest, buildAnswerPrompt, extractPageDate, gbrainHome, geminiAnswer, usesHostedProvider } from "../lib/eval/qa.ts";
 import { ClientError } from "../lib/util/http-security.ts";
 
 function fakeGeminiResponse(status: number, body: unknown): Response {
   return new Response(typeof body === "string" ? body : JSON.stringify(body), { status });
 }
+
+test("gbrainHome falls back to the real home directory via os.homedir(), not process.env.HOME directly", () => {
+  // process.env.HOME isn't set by default on Windows (it uses USERPROFILE) --
+  // deleting it here simulates that, proving the fallback doesn't silently
+  // break there the way a direct process.env.HOME read would.
+  const originalGbrainHome = process.env.GBRAIN_HOME;
+  const originalHome = process.env.HOME;
+  try {
+    delete process.env.GBRAIN_HOME;
+    delete process.env.HOME;
+    assert.equal(gbrainHome(), join(homedir(), ".aletheia-brain"));
+  } finally {
+    if (originalGbrainHome === undefined) delete process.env.GBRAIN_HOME; else process.env.GBRAIN_HOME = originalGbrainHome;
+    if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
+  }
+});
+
+test("gbrainHome still honors an explicit GBRAIN_HOME override", () => {
+  const original = process.env.GBRAIN_HOME;
+  try {
+    process.env.GBRAIN_HOME = "/tmp/custom-brain-for-test";
+    assert.equal(gbrainHome(), "/tmp/custom-brain-for-test");
+  } finally {
+    if (original === undefined) delete process.env.GBRAIN_HOME; else process.env.GBRAIN_HOME = original;
+  }
+});
 
 test("usesHostedProvider defaults to local Ollama, never opts into a hosted API by itself", () => {
   const original = process.env.ASK_PROVIDER;

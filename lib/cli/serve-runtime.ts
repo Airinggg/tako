@@ -2,17 +2,17 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { gbrainHome } from "../eval/qa.ts";
 
 export const REPO_ROOT = resolve(import.meta.dir, "../..");
 export const BRAIN_PACKAGE = join(REPO_ROOT, "packages/brain");
 export const BRAIN_CLI = join(BRAIN_PACKAGE, "src/cli.ts");
-export const GBRAIN_HOME = join(process.env.HOME || "", ".aletheia-brain");
+export const GBRAIN_HOME = gbrainHome();
 const SERVE_STATE = join(tmpdir(), `tako-omnibrain-serve-${process.getuid?.() ?? "user"}.json`);
 
 export type ServeProcess = { pid: number; port: number; managed: boolean };
 
 export function brainEnv(): NodeJS.ProcessEnv {
-  if (!process.env.HOME) throw new Error("HOME is required to locate .aletheia-brain");
   return { ...process.env, GBRAIN_HOME };
 }
 
@@ -35,6 +35,14 @@ function readManagedServe(): ServeProcess | null {
 export function findAlethiaServe(): ServeProcess | null {
   const managed = readManagedServe();
   if (managed) return managed;
+  // This fallback only matters if the state file above is lost or was never
+  // written (e.g. a serve process started outside serveGbrain()) -- the
+  // normal path is already fully cross-platform. `ps` itself is Unix-only;
+  // rather than reimplement this scan against Windows' very different
+  // process-listing tools for a fallback-of-a-fallback, skip it there and
+  // rely on the state file, which is how every process this codebase starts
+  // is actually tracked.
+  if (process.platform === "win32") return null;
   const result = spawnSync("ps", ["eww", "-axo", "pid=,command="], { encoding: "utf8" });
   if (result.status !== 0) return null;
   for (const line of result.stdout.split("\n")) {

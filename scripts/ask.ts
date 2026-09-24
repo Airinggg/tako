@@ -7,10 +7,11 @@
  */
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
+import { gbrainHome } from "../lib/eval/qa.ts";
 
 const REPO = join(import.meta.dir, "..");
 const BRAIN_CLI = join(REPO, "packages/brain/src/cli.ts");
-const GBRAIN_HOME = process.env.GBRAIN_HOME || join(process.env.HOME || "", ".aletheia-brain");
+const GBRAIN_HOME = gbrainHome();
 const MODEL = process.env.ASK_MODEL || "qwen2.5:3b-instruct";
 const OLLAMA = process.env.OLLAMA_HOST || "http://localhost:11434";
 const PORT = Number(process.env.PORT) || 4331;

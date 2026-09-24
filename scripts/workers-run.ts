@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseSkill, type ParsedSkill } from "../lib/skills/parse.ts";
 import { dueWorkers, type WorkersState } from "../lib/workers/model.ts";
@@ -11,9 +12,11 @@ import {
 
 const REPO = join(import.meta.dir, "..");
 const CONFIG = join(REPO, "config");
-const HOME = process.env.HOME;
-if (!HOME) throw new Error("HOME is required to locate .aletheia-brain");
-const PROTECTED_BRAIN_HOME = join(HOME, ".aletheia-brain");
+// homedir() (not process.env.HOME) so this resolves on Windows too, where
+// HOME isn't set by default. Deliberately not gbrainHome() -- this pins to
+// the real ~/.aletheia-brain regardless of any GBRAIN_HOME override, so a
+// worker process can never read ~/.gbrain or another brain.
+const PROTECTED_BRAIN_HOME = join(homedir(), ".aletheia-brain");
 // Ignore inherited values so this process can never read ~/.gbrain or another brain.
 process.env.GBRAIN_HOME = PROTECTED_BRAIN_HOME;
 

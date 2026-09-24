@@ -6,12 +6,13 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
+import { gbrainHome } from "../eval/qa.ts";
 import { grantsForScope, parseSkillFrontmatter, type SkillFrontmatter } from "../scopes/grants.ts";
 import { buildTree, excluded, included, type Scope } from "../scopes/model.ts";
 
 const REPO = join(import.meta.dir, "..", "..");
 const BRAIN_CLI = join(REPO, "packages/brain/src/cli.ts");
-export const GBRAIN_HOME = process.env.GBRAIN_HOME || join(process.env.HOME || "", ".aletheia-brain");
+export const GBRAIN_HOME = gbrainHome();
 const SCOPES_PATH = join(REPO, "config/scopes.json");
 const BRAIN_SOURCES = join(REPO, "brain-sources");
 

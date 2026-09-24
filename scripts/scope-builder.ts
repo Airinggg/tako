@@ -2,11 +2,12 @@
 import { spawnSync } from "node:child_process";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { gbrainHome } from "../lib/eval/qa.ts";
 import { buildTree, excluded, included, realisationPlan, type Scope, type TreeNode } from "../lib/scopes/model.ts";
 
 const REPO = join(import.meta.dir, "..");
 const BRAIN_CLI = join(REPO, "packages/brain/src/cli.ts");
-const GBRAIN_HOME = join(process.env.HOME || "", ".aletheia-brain");
+const GBRAIN_HOME = gbrainHome();
 const SCOPES_PATH = join(REPO, "config/scopes.json");
 const PORT = Number(process.env.PORT) || 4341;
 const cache = new Map<string, { at: number; value: string }>();

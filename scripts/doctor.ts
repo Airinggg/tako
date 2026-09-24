@@ -2,13 +2,14 @@
  *  the user hits a confusing failure three steps into setup. */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { gbrainHome } from "../lib/eval/qa.ts";
 import {
   checkBunVersion, checkConnectorsConfig, checkGbrainHome, checkModelsPulled,
   checkOllamaRunning, formatReport, parseOllamaTags, type DoctorCheck,
 } from "../lib/cli/doctor.ts";
 
 const REPO = join(import.meta.dir, "..");
-const GBRAIN_HOME = join(process.env.HOME || "", ".aletheia-brain");
+const GBRAIN_HOME = gbrainHome();
 const CONNECTORS_CONFIG = join(REPO, "config/connectors.json");
 
 async function fetchPulledModelTags(host: string): Promise<string[]> {
